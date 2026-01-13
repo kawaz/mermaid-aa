@@ -396,13 +396,16 @@ impl Canvas {
     }
 
     fn render(&self) -> String {
-        self.data
+        let lines: Vec<String> = self.data
             .iter()
             .map(|row| row.iter().collect::<String>().trim_end().to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-            .trim_end()
-            .to_string()
+            .collect();
+
+        // Remove leading and trailing empty lines
+        let start = lines.iter().position(|l| !l.is_empty()).unwrap_or(0);
+        let end = lines.iter().rposition(|l| !l.is_empty()).unwrap_or(lines.len());
+
+        lines[start..=end].join("\n")
     }
 }
 
