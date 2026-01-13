@@ -71,28 +71,36 @@ func Parse(text string) (*Graph, error) {
 		Edges:     make([]*Edge, 0),
 	}
 
+	// Split by newlines first, then by semicolons
 	lines := strings.Split(text, "\n")
+	var statements []string
+	for _, line := range lines {
+		// Split by semicolons to handle "graph TD; A-->B; B-->C"
+		parts := strings.Split(line, ";")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				statements = append(statements, part)
+			}
+		}
+	}
 
 	// Parse graph declaration
 	graphDeclRegex := regexp.MustCompile(`(?i)^\s*(graph|flowchart)\s+(TD|TB|BT|LR|RL)\s*$`)
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "%%") {
+	for _, stmt := range statements {
+		if stmt == "" || strings.HasPrefix(stmt, "%%") {
 			continue
 		}
 
-		// Remove trailing semicolon
-		line = strings.TrimSuffix(line, ";")
-
 		// Check for graph declaration
-		if matches := graphDeclRegex.FindStringSubmatch(line); matches != nil {
+		if matches := graphDeclRegex.FindStringSubmatch(stmt); matches != nil {
 			graph.Direction = Direction(strings.ToUpper(matches[2]))
 			continue
 		}
 
 		// Parse edges and nodes - handle chained edges like A --> B --> C
-		parseChainedEdges(graph, line)
+		parseChainedEdges(graph, stmt)
 	}
 
 	return graph, nil

@@ -12,40 +12,58 @@ import (
 type Canvas struct {
 	Width  int
 	Height int
-	Data   [][]rune
+	Data   [][]string // Use string slices to support multi-byte characters
 }
 
 // NewCanvas creates a new canvas with the specified size
 func NewCanvas(width, height int) *Canvas {
-	data := make([][]rune, height)
+	data := make([][]string, height)
 	for i := range data {
-		data[i] = make([]rune, width)
+		data[i] = make([]string, width)
 		for j := range data[i] {
-			data[i][j] = ' '
+			data[i][j] = " "
 		}
 	}
 	return &Canvas{Width: width, Height: height, Data: data}
 }
 
 // Set sets a character at the specified position
-func (c *Canvas) Set(x, y int, ch rune) {
+func (c *Canvas) Set(x, y int, ch string) {
 	if x >= 0 && x < c.Width && y >= 0 && y < c.Height {
 		c.Data[y][x] = ch
 	}
 }
 
+// SetRune sets a rune at the specified position
+func (c *Canvas) SetRune(x, y int, ch rune) {
+	c.Set(x, y, string(ch))
+}
+
 // SetString writes a string starting at the specified position
-func (c *Canvas) SetString(x, y int, s string) {
-	for i, ch := range s {
-		c.Set(x+i, y, ch)
+// Returns the number of cells used (accounting for wide characters)
+func (c *Canvas) SetString(x, y int, s string) int {
+	pos := x
+	for _, ch := range s {
+		if pos >= c.Width {
+			break
+		}
+		c.Set(pos, y, string(ch))
+		w := RuneWidth(ch)
+		// For double-width characters, mark the next cell as empty
+		if w == 2 && pos+1 < c.Width {
+			c.Set(pos+1, y, "")
+		}
+		pos += w
 	}
+	return pos - x
 }
 
 // String converts the canvas to a string
 func (c *Canvas) String() string {
 	var sb strings.Builder
 	for _, row := range c.Data {
-		line := strings.TrimRight(string(row), " ")
+		line := strings.Join(row, "")
+		line = strings.TrimRight(line, " ")
 		sb.WriteString(line)
 		sb.WriteRune('\n')
 	}
@@ -68,6 +86,7 @@ type Renderer struct {
 	nodeHeight int
 	hSpacing   int
 	vSpacing   int
+	style      *BoxStyle
 }
 
 // NewRenderer creates a new renderer for the given graph
@@ -79,7 +98,13 @@ func NewRenderer(graph *parser.Graph) *Renderer {
 		nodeHeight: 3,
 		hSpacing:   6,
 		vSpacing:   2,
+		style:      ASCIIStyle,
 	}
+}
+
+// SetStyle sets the rendering style
+func (r *Renderer) SetStyle(style *BoxStyle) {
+	r.style = style
 }
 
 // Render renders the graph as ASCII art
@@ -188,10 +213,11 @@ func (r *Renderer) calculateLayout() {
 		sort.Strings(levelNodes[level])
 	}
 
-	// Calculate node widths
+	// Calculate node widths using StringWidth for proper multi-byte support
 	nodeWidths := make(map[string]int)
 	for id, node := range r.graph.Nodes {
-		nodeWidths[id] = max(len(node.Label)+4, r.nodeWidth)
+		labelWidth := StringWidth(node.Label)
+		nodeWidths[id] = max(labelWidth+4, r.nodeWidth)
 	}
 
 	// Calculate positions based on direction
@@ -227,15 +253,6 @@ func (r *Renderer) calculateLayout() {
 		for level := 0; level <= maxLevel; level++ {
 			nodes := levelNodes[level]
 
-			// Calculate total width of this level
-			totalWidth := 0
-			for i, id := range nodes {
-				totalWidth += nodeWidths[id]
-				if i > 0 {
-					totalWidth += r.hSpacing / 2
-				}
-			}
-
 			xOffset := 0
 			for _, id := range nodes {
 				r.nodePos[id] = &NodePos{
@@ -262,62 +279,129 @@ func (r *Renderer) drawNode(canvas *Canvas, node *parser.Node, pos *NodePos) {
 	x, y := pos.X, pos.Y
 	width := pos.Width
 	label := node.Label
+	s := r.style
 
-	// Center the label
-	labelX := x + (width-len(label))/2
+	// Calculate label position (centered)
+	labelWidth := StringWidth(label)
+	labelX := x + (width-labelWidth)/2
 	labelY := y + 1
+
+	innerWidth := width - 2
 
 	switch node.Shape {
 	case parser.Rectangle:
-		// Draw rectangle
-		canvas.SetString(x, y, "+"+strings.Repeat("-", width-2)+"+")
-		canvas.SetString(x, y+1, "|"+strings.Repeat(" ", width-2)+"|")
-		canvas.SetString(x, y+2, "+"+strings.Repeat("-", width-2)+"+")
+		r.drawBox(canvas, x, y, width, s.TopLeft, s.TopRight, s.BottomLeft, s.BottomRight, s.Horizontal, s.Vertical)
 		canvas.SetString(labelX, labelY, label)
 
 	case parser.RoundedRect:
-		// Draw rounded rectangle
-		canvas.SetString(x, y, "/"+strings.Repeat("-", width-2)+"\\")
-		canvas.SetString(x, y+1, "|"+strings.Repeat(" ", width-2)+"|")
-		canvas.SetString(x, y+2, "\\"+strings.Repeat("-", width-2)+"/")
+		r.drawBox(canvas, x, y, width, s.RoundTopLeft, s.RoundTopRight, s.RoundBottomLeft, s.RoundBottomRight, s.Horizontal, s.Vertical)
 		canvas.SetString(labelX, labelY, label)
 
 	case parser.Rhombus:
 		// Draw diamond/rhombus
 		halfW := width / 2
 		canvas.SetString(x+halfW-1, y, "/\\")
-		canvas.SetString(x, y+1, "<"+strings.Repeat(" ", width-2)+">")
+		canvas.Set(x, y+1, s.DiamondLeft)
+		for i := 1; i < innerWidth+1; i++ {
+			canvas.Set(x+i, y+1, " ")
+		}
+		canvas.Set(x+width-1, y+1, s.DiamondRight)
 		canvas.SetString(x+halfW-1, y+2, "\\/")
 		canvas.SetString(labelX, labelY, label)
 
 	case parser.Circle:
-		// Draw circle
-		canvas.SetString(x, y, "("+strings.Repeat("-", width-2)+")")
-		canvas.SetString(x, y+1, "("+strings.Repeat(" ", width-2)+")")
-		canvas.SetString(x, y+2, "("+strings.Repeat("-", width-2)+")")
+		// Draw circle using parentheses
+		canvas.Set(x, y, "(")
+		for i := 0; i < innerWidth; i++ {
+			canvas.Set(x+1+i, y, s.Horizontal)
+		}
+		canvas.Set(x+width-1, y, ")")
+
+		canvas.Set(x, y+1, "(")
+		for i := 0; i < innerWidth; i++ {
+			canvas.Set(x+1+i, y+1, " ")
+		}
+		canvas.Set(x+width-1, y+1, ")")
+
+		canvas.Set(x, y+2, "(")
+		for i := 0; i < innerWidth; i++ {
+			canvas.Set(x+1+i, y+2, s.Horizontal)
+		}
+		canvas.Set(x+width-1, y+2, ")")
 		canvas.SetString(labelX, labelY, label)
 
 	case parser.Hexagon:
 		// Draw hexagon
-		canvas.SetString(x+1, y, "/"+strings.Repeat("-", width-4)+"\\")
-		canvas.SetString(x, y+1, "<"+strings.Repeat(" ", width-2)+">")
-		canvas.SetString(x+1, y+2, "\\"+strings.Repeat("-", width-4)+"/")
+		canvas.Set(x+1, y, "/")
+		for i := 0; i < innerWidth-2; i++ {
+			canvas.Set(x+2+i, y, s.Horizontal)
+		}
+		canvas.Set(x+width-2, y, "\\")
+
+		canvas.Set(x, y+1, "<")
+		for i := 0; i < innerWidth; i++ {
+			canvas.Set(x+1+i, y+1, " ")
+		}
+		canvas.Set(x+width-1, y+1, ">")
+
+		canvas.Set(x+1, y+2, "\\")
+		for i := 0; i < innerWidth-2; i++ {
+			canvas.Set(x+2+i, y+2, s.Horizontal)
+		}
+		canvas.Set(x+width-2, y+2, "/")
 		canvas.SetString(labelX, labelY, label)
 
 	case parser.Stadium:
 		// Draw stadium shape
-		canvas.SetString(x, y, "("+strings.Repeat("=", width-2)+")")
-		canvas.SetString(x, y+1, "|"+strings.Repeat(" ", width-2)+"|")
-		canvas.SetString(x, y+2, "("+strings.Repeat("=", width-2)+")")
+		canvas.Set(x, y, "(")
+		for i := 0; i < innerWidth; i++ {
+			canvas.Set(x+1+i, y, "=")
+		}
+		canvas.Set(x+width-1, y, ")")
+
+		canvas.Set(x, y+1, s.Vertical)
+		for i := 0; i < innerWidth; i++ {
+			canvas.Set(x+1+i, y+1, " ")
+		}
+		canvas.Set(x+width-1, y+1, s.Vertical)
+
+		canvas.Set(x, y+2, "(")
+		for i := 0; i < innerWidth; i++ {
+			canvas.Set(x+1+i, y+2, "=")
+		}
+		canvas.Set(x+width-1, y+2, ")")
 		canvas.SetString(labelX, labelY, label)
 
 	default:
 		// Default to rectangle
-		canvas.SetString(x, y, "+"+strings.Repeat("-", width-2)+"+")
-		canvas.SetString(x, y+1, "|"+strings.Repeat(" ", width-2)+"|")
-		canvas.SetString(x, y+2, "+"+strings.Repeat("-", width-2)+"+")
+		r.drawBox(canvas, x, y, width, s.TopLeft, s.TopRight, s.BottomLeft, s.BottomRight, s.Horizontal, s.Vertical)
 		canvas.SetString(labelX, labelY, label)
 	}
+}
+
+func (r *Renderer) drawBox(canvas *Canvas, x, y, width int, tl, tr, bl, br, h, v string) {
+	innerWidth := width - 2
+
+	// Top line
+	canvas.Set(x, y, tl)
+	for i := 0; i < innerWidth; i++ {
+		canvas.Set(x+1+i, y, h)
+	}
+	canvas.Set(x+width-1, y, tr)
+
+	// Middle line
+	canvas.Set(x, y+1, v)
+	for i := 0; i < innerWidth; i++ {
+		canvas.Set(x+1+i, y+1, " ")
+	}
+	canvas.Set(x+width-1, y+1, v)
+
+	// Bottom line
+	canvas.Set(x, y+2, bl)
+	for i := 0; i < innerWidth; i++ {
+		canvas.Set(x+1+i, y+2, h)
+	}
+	canvas.Set(x+width-1, y+2, br)
 }
 
 func (r *Renderer) drawEdges(canvas *Canvas) {
@@ -343,6 +427,7 @@ func (r *Renderer) drawEdge(canvas *Canvas, edge *parser.Edge, from, to *NodePos
 }
 
 func (r *Renderer) drawHorizontalEdge(canvas *Canvas, edge *parser.Edge, from, to *NodePos) {
+	s := r.style
 	startX := from.X + from.Width
 	startY := from.Y + from.Height/2
 	endX := to.X
@@ -350,17 +435,17 @@ func (r *Renderer) drawHorizontalEdge(canvas *Canvas, edge *parser.Edge, from, t
 
 	if startY == endY {
 		// Simple horizontal line
-		for x := startX; x < endX; x++ {
-			canvas.Set(x, startY, '-')
+		for x := startX; x < endX-1; x++ {
+			canvas.Set(x, startY, s.Horizontal)
 		}
-		canvas.Set(endX-1, endY, '>')
+		canvas.Set(endX-1, endY, s.ArrowRight)
 	} else {
 		// Need to route around
 		midX := (startX + endX) / 2
 
 		// Draw from start to mid
-		for x := startX; x <= midX; x++ {
-			canvas.Set(x, startY, '-')
+		for x := startX; x < midX; x++ {
+			canvas.Set(x, startY, s.Horizontal)
 		}
 
 		// Draw vertical part
@@ -368,34 +453,36 @@ func (r *Renderer) drawHorizontalEdge(canvas *Canvas, edge *parser.Edge, from, t
 		if startY > endY {
 			minY, maxY = endY, startY
 		}
-		for y := minY; y <= maxY; y++ {
-			canvas.Set(midX, y, '|')
+		for y := minY + 1; y < maxY; y++ {
+			canvas.Set(midX, y, s.Vertical)
 		}
 
 		// Draw corner characters
 		if startY < endY {
-			canvas.Set(midX, startY, '+')
-			canvas.Set(midX, endY, '+')
+			canvas.Set(midX, startY, s.TeeDown)
+			canvas.Set(midX, endY, s.TeeUp)
 		} else {
-			canvas.Set(midX, startY, '+')
-			canvas.Set(midX, endY, '+')
+			canvas.Set(midX, startY, s.TeeUp)
+			canvas.Set(midX, endY, s.TeeDown)
 		}
 
 		// Draw from mid to end
-		for x := midX; x < endX; x++ {
-			canvas.Set(x, endY, '-')
+		for x := midX + 1; x < endX-1; x++ {
+			canvas.Set(x, endY, s.Horizontal)
 		}
-		canvas.Set(endX-1, endY, '>')
+		canvas.Set(endX-1, endY, s.ArrowRight)
 	}
 
 	// Draw edge label if present
 	if edge.Label != "" {
 		midX := (startX + endX) / 2
-		canvas.SetString(midX-len(edge.Label)/2, startY-1, edge.Label)
+		labelWidth := StringWidth(edge.Label)
+		canvas.SetString(midX-labelWidth/2, startY-1, edge.Label)
 	}
 }
 
 func (r *Renderer) drawVerticalEdge(canvas *Canvas, edge *parser.Edge, from, to *NodePos) {
+	s := r.style
 	startX := from.X + from.Width/2
 	startY := from.Y + from.Height
 	endX := to.X + to.Width/2
@@ -403,10 +490,10 @@ func (r *Renderer) drawVerticalEdge(canvas *Canvas, edge *parser.Edge, from, to 
 
 	if startX == endX {
 		// Simple vertical line
-		for y := startY; y < endY; y++ {
-			canvas.Set(startX, y, '|')
+		for y := startY; y < endY-1; y++ {
+			canvas.Set(startX, y, s.Vertical)
 		}
-		canvas.Set(endX, endY-1, 'v')
+		canvas.Set(endX, endY-1, s.ArrowDown)
 
 		// Draw edge label if present (for straight lines)
 		if edge.Label != "" {
@@ -418,8 +505,8 @@ func (r *Renderer) drawVerticalEdge(canvas *Canvas, edge *parser.Edge, from, to 
 		midY := (startY + endY) / 2
 
 		// Draw from start down to mid
-		for y := startY; y <= midY; y++ {
-			canvas.Set(startX, y, '|')
+		for y := startY; y < midY; y++ {
+			canvas.Set(startX, y, s.Vertical)
 		}
 
 		// Draw horizontal part
@@ -427,23 +514,29 @@ func (r *Renderer) drawVerticalEdge(canvas *Canvas, edge *parser.Edge, from, to 
 		if startX > endX {
 			minX, maxX = endX, startX
 		}
-		for x := minX; x <= maxX; x++ {
-			canvas.Set(x, midY, '-')
+		for x := minX + 1; x < maxX; x++ {
+			canvas.Set(x, midY, s.Horizontal)
 		}
 
 		// Draw corner characters
-		canvas.Set(startX, midY, '+')
-		canvas.Set(endX, midY, '+')
+		if startX < endX {
+			canvas.Set(startX, midY, s.TeeRight)
+			canvas.Set(endX, midY, s.TeeLeft)
+		} else {
+			canvas.Set(startX, midY, s.TeeLeft)
+			canvas.Set(endX, midY, s.TeeRight)
+		}
 
 		// Draw from mid down to end
-		for y := midY; y < endY; y++ {
-			canvas.Set(endX, y, '|')
+		for y := midY + 1; y < endY-1; y++ {
+			canvas.Set(endX, y, s.Vertical)
 		}
-		canvas.Set(endX, endY-1, 'v')
+		canvas.Set(endX, endY-1, s.ArrowDown)
 
 		// Draw edge label on horizontal segment
 		if edge.Label != "" {
-			labelX := (minX + maxX) / 2 - len(edge.Label)/2
+			labelWidth := StringWidth(edge.Label)
+			labelX := (minX + maxX) / 2 - labelWidth/2
 			canvas.SetString(labelX, midY-1, edge.Label)
 		}
 	}

@@ -12,13 +12,15 @@ import (
 	"github.com/kawaz/mermaid-aa/renderer"
 )
 
-var version = "0.1.0"
+var version = "0.2.0"
 
 func main() {
 	var (
 		showVersion bool
 		debugMode   bool
 		inputFile   string
+		styleName   string
+		listStyles  bool
 	)
 
 	flag.BoolVar(&showVersion, "version", false, "Show version")
@@ -27,10 +29,21 @@ func main() {
 	flag.BoolVar(&debugMode, "d", false, "Show debug output (short)")
 	flag.StringVar(&inputFile, "file", "", "Input file")
 	flag.StringVar(&inputFile, "f", "", "Input file (short)")
+	flag.StringVar(&styleName, "style", "ascii", "Output style: ascii, unicode, unicode-bold, unicode-double, unicode-round")
+	flag.StringVar(&styleName, "s", "ascii", "Output style (short)")
+	flag.BoolVar(&listStyles, "list-styles", false, "List available styles")
 	flag.Parse()
 
 	if showVersion {
 		fmt.Printf("mermaid-aa version %s\n", version)
+		os.Exit(0)
+	}
+
+	if listStyles {
+		fmt.Println("Available styles:")
+		for _, s := range renderer.AvailableStyles() {
+			fmt.Printf("  %s\n", s)
+		}
 		os.Exit(0)
 	}
 
@@ -64,6 +77,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: no input provided\n")
 		fmt.Fprintf(os.Stderr, "Usage: mermaid-aa [options] [file or mermaid text]\n")
 		fmt.Fprintf(os.Stderr, "       echo 'graph TD; A-->B' | mermaid-aa\n")
+		fmt.Fprintf(os.Stderr, "       mermaid-aa -s unicode diagram.mmd\n")
+		fmt.Fprintf(os.Stderr, "\nOptions:\n")
+		fmt.Fprintf(os.Stderr, "  -s, --style    Output style (ascii, unicode, unicode-bold, unicode-double, unicode-round)\n")
+		fmt.Fprintf(os.Stderr, "  -f, --file     Input file\n")
+		fmt.Fprintf(os.Stderr, "  -d, --debug    Show debug output\n")
+		fmt.Fprintf(os.Stderr, "  -v, --version  Show version\n")
+		fmt.Fprintf(os.Stderr, "  --list-styles  List available styles\n")
 		os.Exit(1)
 	}
 
@@ -81,6 +101,7 @@ func main() {
 
 	// Render as ASCII art
 	r := renderer.NewRenderer(graph)
+	r.SetStyle(renderer.GetStyle(styleName))
 	output := r.Render()
 	fmt.Print(output)
 }
