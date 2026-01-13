@@ -57,61 +57,85 @@ function parseFlowchart(input: string): FlowchartDiagram {
     // Skip subgraph, end, style, class directives
     if (/^(subgraph|end|style|class|click|linkstyle)/i.test(line)) continue;
 
-    // Parse edge patterns: A --> B, A --- B, A -.-> B, A ==> B, etc.
-    const edgeMatch = line.match(
-      /^(\w+)(\[[^\]]+\]|\([^)]+\)|\{[^}]+\}|>([^<]+)<\]|\(\([^)]+\)\)|\[\[[^\]]+\]\])?\s*(-->|---|-\.->|-.->|==>|-->\|[^|]+\||---\|[^|]+\||-\.->\|[^|]+\|)\s*(\w+)(\[[^\]]+\]|\([^)]+\)|\{[^}]+\}|>([^<]+)<\]|\(\([^)]+\)\)|\[\[[^\]]+\]\])?/
-    );
+    // Parse chained edges: A --> B --> C or A[Label] --> B[Label] --> C[Label]
+    const nodePattern = /(\w+)(\[[^\]]+\]|\([^)]+\)|\{[^}]+\}|\(\([^)]+\)\)|\[\[[^\]]+\]\])?/g;
+    const edgePattern = /(-->|---|-\.->|-.->|==>|-->\|[^|]+\||---\|[^|]+\||-\.->\|[^|]+\|)/g;
 
-    if (edgeMatch) {
-      const fromId = edgeMatch[1];
-      const fromShape = edgeMatch[2];
-      const edgeStyle = edgeMatch[4];
-      const toId = edgeMatch[5];
-      const toShape = edgeMatch[6];
+    // Find all nodes and edges in the line
+    const nodeMatches: Array<{ id: string; shape?: string; index: number }> = [];
+    const edgeMatches: Array<{ style: string; index: number }> = [];
 
-      // Add/update nodes
-      if (!nodes.has(fromId)) {
-        nodes.set(fromId, parseNodeShape(fromId, fromShape));
-      } else if (fromShape && !nodes.get(fromId)!.label.includes(fromId)) {
-        nodes.set(fromId, parseNodeShape(fromId, fromShape));
+    let nodeMatch;
+    while ((nodeMatch = nodePattern.exec(line)) !== null) {
+      // Skip if this is part of an edge pattern
+      if (nodeMatch[0].startsWith('-') || nodeMatch[0].startsWith('=')) continue;
+      nodeMatches.push({
+        id: nodeMatch[1],
+        shape: nodeMatch[2],
+        index: nodeMatch.index,
+      });
+    }
+
+    let edgeMatch;
+    while ((edgeMatch = edgePattern.exec(line)) !== null) {
+      edgeMatches.push({
+        style: edgeMatch[1],
+        index: edgeMatch.index,
+      });
+    }
+
+    // If we found edges, process them
+    if (edgeMatches.length > 0 && nodeMatches.length >= 2) {
+      // Sort by index position
+      nodeMatches.sort((a, b) => a.index - b.index);
+      edgeMatches.sort((a, b) => a.index - b.index);
+
+      // Add all nodes
+      for (const nm of nodeMatches) {
+        if (!nodes.has(nm.id)) {
+          nodes.set(nm.id, parseNodeShape(nm.id, nm.shape));
+        } else if (nm.shape && nodes.get(nm.id)!.label === nm.id) {
+          nodes.set(nm.id, parseNodeShape(nm.id, nm.shape));
+        }
       }
 
-      if (!nodes.has(toId)) {
-        nodes.set(toId, parseNodeShape(toId, toShape));
-      } else if (toShape && nodes.get(toId)!.label === toId) {
-        nodes.set(toId, parseNodeShape(toId, toShape));
+      // Create edges between consecutive nodes
+      for (let j = 0; j < edgeMatches.length && j < nodeMatches.length - 1; j++) {
+        const fromNode = nodeMatches[j];
+        const toNode = nodeMatches[j + 1];
+        const edgeStyle = edgeMatches[j].style;
+
+        // Parse edge label
+        let edgeLabel: string | undefined;
+        const labelMatch = edgeStyle.match(/\|([^|]+)\|/);
+        if (labelMatch) {
+          edgeLabel = labelMatch[1];
+        }
+
+        // Determine edge style
+        let style: FlowchartEdge['style'] = 'solid';
+        let arrow: FlowchartEdge['arrow'] = 'arrow';
+
+        if (edgeStyle.includes('-.') || edgeStyle.includes('-.-')) {
+          style = 'dotted';
+        } else if (edgeStyle.includes('==')) {
+          style = 'thick';
+        }
+
+        if (edgeStyle.includes('---')) {
+          arrow = 'none';
+        }
+
+        edges.push({ from: fromNode.id, to: toNode.id, label: edgeLabel, style, arrow });
       }
-
-      // Parse edge label
-      let edgeLabel: string | undefined;
-      const labelMatch = edgeStyle.match(/\|([^|]+)\|/);
-      if (labelMatch) {
-        edgeLabel = labelMatch[1];
-      }
-
-      // Determine edge style
-      let style: FlowchartEdge['style'] = 'solid';
-      let arrow: FlowchartEdge['arrow'] = 'arrow';
-
-      if (edgeStyle.includes('-.') || edgeStyle.includes('-.-')) {
-        style = 'dotted';
-      } else if (edgeStyle.includes('==')) {
-        style = 'thick';
-      }
-
-      if (edgeStyle.includes('---')) {
-        arrow = 'none';
-      }
-
-      edges.push({ from: fromId, to: toId, label: edgeLabel, style, arrow });
       continue;
     }
 
     // Parse standalone node definition: A[Label] or A(Label) etc.
-    const nodeMatch = line.match(/^(\w+)(\[[^\]]+\]|\([^)]+\)|\{[^}]+\}|\(\([^)]+\)\)|\[\[[^\]]+\]\])$/);
-    if (nodeMatch) {
-      const nodeId = nodeMatch[1];
-      const nodeShape = nodeMatch[2];
+    const standaloneMatch = line.match(/^(\w+)(\[[^\]]+\]|\([^)]+\)|\{[^}]+\}|\(\([^)]+\)\)|\[\[[^\]]+\]\])$/);
+    if (standaloneMatch) {
+      const nodeId = standaloneMatch[1];
+      const nodeShape = standaloneMatch[2];
       nodes.set(nodeId, parseNodeShape(nodeId, nodeShape));
     }
   }

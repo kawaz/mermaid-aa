@@ -44,3 +44,37 @@ export interface SequenceDiagram {
 }
 
 export type Diagram = FlowchartDiagram | SequenceDiagram | { type: 'unknown' };
+
+// Character set for rendering
+export type CharsetName = 'ascii' | 'unicode' | 'unicode-round' | 'unicode-bold' | 'unicode-double';
+
+export interface Charset {
+  // Box corners
+  topLeft: string;
+  topRight: string;
+  bottomLeft: string;
+  bottomRight: string;
+  // Lines
+  horizontal: string;
+  vertical: string;
+  // T-connections
+  teeRight: string;
+  teeLeft: string;
+  teeDown: string;
+  teeUp: string;
+  cross: string;
+  // Arrows
+  arrowRight: string;
+  arrowLeft: string;
+  arrowDown: string;
+  arrowUp: string;
+  // Rounded corners (for rounded shape)
+  roundTopLeft: string;
+  roundTopRight: string;
+  roundBottomLeft: string;
+  roundBottomRight: string;
+}
+
+export interface RenderOptions {
+  charset: CharsetName;
+}

@@ -4,14 +4,133 @@ import {
   FlowchartNode,
   FlowchartEdge,
   SequenceDiagram,
+  Charset,
+  CharsetName,
+  RenderOptions,
 } from './types';
 
-export function render(diagram: Diagram): string {
+// Character set definitions
+const CHARSETS: Record<CharsetName, Charset> = {
+  ascii: {
+    topLeft: '+',
+    topRight: '+',
+    bottomLeft: '+',
+    bottomRight: '+',
+    horizontal: '-',
+    vertical: '|',
+    teeRight: '+',
+    teeLeft: '+',
+    teeDown: '+',
+    teeUp: '+',
+    cross: '+',
+    arrowRight: '>',
+    arrowLeft: '<',
+    arrowDown: 'v',
+    arrowUp: '^',
+    roundTopLeft: '/',
+    roundTopRight: '\\',
+    roundBottomLeft: '\\',
+    roundBottomRight: '/',
+  },
+  unicode: {
+    topLeft: '┌',
+    topRight: '┐',
+    bottomLeft: '└',
+    bottomRight: '┘',
+    horizontal: '─',
+    vertical: '│',
+    teeRight: '├',
+    teeLeft: '┤',
+    teeDown: '┬',
+    teeUp: '┴',
+    cross: '┼',
+    arrowRight: '→',
+    arrowLeft: '←',
+    arrowDown: '↓',
+    arrowUp: '↑',
+    roundTopLeft: '┌',
+    roundTopRight: '┐',
+    roundBottomLeft: '└',
+    roundBottomRight: '┘',
+  },
+  'unicode-round': {
+    topLeft: '╭',
+    topRight: '╮',
+    bottomLeft: '╰',
+    bottomRight: '╯',
+    horizontal: '─',
+    vertical: '│',
+    teeRight: '├',
+    teeLeft: '┤',
+    teeDown: '┬',
+    teeUp: '┴',
+    cross: '┼',
+    arrowRight: '→',
+    arrowLeft: '←',
+    arrowDown: '↓',
+    arrowUp: '↑',
+    roundTopLeft: '╭',
+    roundTopRight: '╮',
+    roundBottomLeft: '╰',
+    roundBottomRight: '╯',
+  },
+  'unicode-bold': {
+    topLeft: '┏',
+    topRight: '┓',
+    bottomLeft: '┗',
+    bottomRight: '┛',
+    horizontal: '━',
+    vertical: '┃',
+    teeRight: '┣',
+    teeLeft: '┫',
+    teeDown: '┳',
+    teeUp: '┻',
+    cross: '╋',
+    arrowRight: '▶',
+    arrowLeft: '◀',
+    arrowDown: '▼',
+    arrowUp: '▲',
+    roundTopLeft: '┏',
+    roundTopRight: '┓',
+    roundBottomLeft: '┗',
+    roundBottomRight: '┛',
+  },
+  'unicode-double': {
+    topLeft: '╔',
+    topRight: '╗',
+    bottomLeft: '╚',
+    bottomRight: '╝',
+    horizontal: '═',
+    vertical: '║',
+    teeRight: '╠',
+    teeLeft: '╣',
+    teeDown: '╦',
+    teeUp: '╩',
+    cross: '╬',
+    arrowRight: '▷',
+    arrowLeft: '◁',
+    arrowDown: '▽',
+    arrowUp: '△',
+    roundTopLeft: '╔',
+    roundTopRight: '╗',
+    roundBottomLeft: '╚',
+    roundBottomRight: '╝',
+  },
+};
+
+const DEFAULT_OPTIONS: RenderOptions = {
+  charset: 'ascii',
+};
+
+export function render(diagram: Diagram, options: Partial<RenderOptions> = {}): string {
+  const opts: RenderOptions = { ...DEFAULT_OPTIONS, ...options };
+  const charset = CHARSETS[opts.charset];
+
   switch (diagram.type) {
     case 'flowchart':
-      return renderFlowchart(diagram);
+      return renderFlowchart(diagram, charset);
     case 'sequence':
-      return renderSequence(diagram);
+      return renderSequence(diagram, charset);
     default:
       return 'Unknown diagram type';
   }
@@ -48,13 +167,13 @@ class Canvas {
     }
   }
 
-  drawHLine(x: number, y: number, length: number, char = '-'): void {
+  drawHLine(x: number, y: number, length: number, char: string): void {
     for (let i = 0; i < length; i++) {
       this.set(x + i, y, char);
     }
   }
 
-  drawVLine(x: number, y: number, length: number, char = '|'): void {
+  drawVLine(x: number, y: number, length: number, char: string): void {
     for (let i = 0; i < length; i++) {
       this.set(x, y + i, char);
     }
@@ -66,7 +185,7 @@ class Canvas {
 }
 
 // Flowchart renderer
-function renderFlowchart(diagram: FlowchartDiagram): string {
+function renderFlowchart(diagram: FlowchartDiagram, charset: Charset): string {
   const { nodes, edges, direction } = diagram;
 
   if (nodes.length === 0) {
@@ -109,7 +228,7 @@ function renderFlowchart(diagram: FlowchartDiagram): string {
     const h = nodeHeight;
 
     nodeCoords.set(node.id, { x, y, w, h });
-    drawNode(canvas, x, y, w, h, node);
+    drawNode(canvas, x, y, w, h, node, charset);
   }
 
   // Draw edges
@@ -118,7 +237,7 @@ function renderFlowchart(diagram: FlowchartDiagram): string {
     const toCoord = nodeCoords.get(edge.to);
     if (!fromCoord || !toCoord) continue;
 
-    drawEdge(canvas, fromCoord, toCoord, edge, isHorizontal);
+    drawEdge(canvas, fromCoord, toCoord, edge, isHorizontal, charset);
   }
 
   return canvas.toString();
@@ -203,7 +322,8 @@ function drawNode(
   y: number,
   w: number,
   h: number,
-  node: FlowchartNode
+  node: FlowchartNode,
+  charset: Charset
 ): void {
   const label = node.label.substring(0, w - 4);
   const labelX = x + Math.floor((w - label.length) / 2);
@@ -211,85 +331,89 @@ function drawNode(
 
   switch (node.shape) {
     case 'rectangle':
-      // +--------+
-      // |  text  |
-      // +--------+
-      canvas.drawHLine(x, y, w, '-');
-      canvas.drawHLine(x, y + h - 1, w, '-');
-      canvas.set(x, y, '+');
-      canvas.set(x + w - 1, y, '+');
-      canvas.set(x, y + h - 1, '+');
-      canvas.set(x + w - 1, y + h - 1, '+');
+      // ┌────────┐
+      // │  text  │
+      // └────────┘
+      canvas.drawHLine(x + 1, y, w - 2, charset.horizontal);
+      canvas.drawHLine(x + 1, y + h - 1, w - 2, charset.horizontal);
+      canvas.set(x, y, charset.topLeft);
+      canvas.set(x + w - 1, y, charset.topRight);
+      canvas.set(x, y + h - 1, charset.bottomLeft);
+      canvas.set(x + w - 1, y + h - 1, charset.bottomRight);
       for (let i = 1; i < h - 1; i++) {
-        canvas.set(x, y + i, '|');
-        canvas.set(x + w - 1, y + i, '|');
+        canvas.set(x, y + i, charset.vertical);
+        canvas.set(x + w - 1, y + i, charset.vertical);
       }
       canvas.drawText(labelX, labelY, label);
       break;
 
     case 'rounded':
-      // /--------\
-      // |  text  |
-      // \--------/
-      canvas.drawHLine(x + 1, y, w - 2, '-');
-      canvas.drawHLine(x + 1, y + h - 1, w - 2, '-');
-      canvas.set(x, y, '/');
-      canvas.set(x + w - 1, y, '\\');
-      canvas.set(x, y + h - 1, '\\');
-      canvas.set(x + w - 1, y + h - 1, '/');
+      // ╭────────╮
+      // │  text  │
+      // ╰────────╯
+      canvas.drawHLine(x + 1, y, w - 2, charset.horizontal);
+      canvas.drawHLine(x + 1, y + h - 1, w - 2, charset.horizontal);
+      canvas.set(x, y, charset.roundTopLeft);
+      canvas.set(x + w - 1, y, charset.roundTopRight);
+      canvas.set(x, y + h - 1, charset.roundBottomLeft);
+      canvas.set(x + w - 1, y + h - 1, charset.roundBottomRight);
       for (let i = 1; i < h - 1; i++) {
-        canvas.set(x, y + i, '|');
-        canvas.set(x + w - 1, y + i, '|');
+        canvas.set(x, y + i, charset.vertical);
+        canvas.set(x + w - 1, y + i, charset.vertical);
       }
       canvas.drawText(labelX, labelY, label);
       break;
 
     case 'diamond':
-      //     /\
-      //    /  \
-      //   < tx >
-      //    \  /
-      //     \/
+      //     ◇
+      //   ╱   ╲
+      //  < txt >
+      //   ╲   ╱
+      //     ◇
       const midX = x + Math.floor(w / 2);
       const midY = y + Math.floor(h / 2);
-      canvas.set(midX, y, '/');
-      canvas.set(midX + 1, y, '\\');
-      canvas.set(midX - 1, y + 1, '/');
-      canvas.set(midX + 2, y + 1, '\\');
+      canvas.set(midX, y, '◇');
+      canvas.set(midX - 1, y + 1, '╱');
+      canvas.set(midX + 1, y + 1, '╲');
       canvas.set(x + 2, midY, '<');
       canvas.set(x + w - 3, midY, '>');
-      canvas.set(midX - 1, y + h - 2, '\\');
-      canvas.set(midX + 2, y + h - 2, '/');
-      canvas.set(midX, y + h - 1, '\\');
-      canvas.set(midX + 1, y + h - 1, '/');
+      canvas.set(midX - 1, y + h - 2, '╲');
+      canvas.set(midX + 1, y + h - 2, '╱');
+      canvas.set(midX, y + h - 1, '◇');
       canvas.drawText(labelX, labelY, label);
       break;
 
     case 'circle':
-      //  .--.
-      // ( tx )
-      //  '--'
-      canvas.drawText(x + 1, y, '.--.');
-      canvas.set(x, y + 1, '(');
-      canvas.set(x + w - 4, y + 1, ')');
-      canvas.drawText(x + 1, y + 2, "'--'");
-      canvas.drawText(x + 2, y + 1, label.substring(0, w - 6));
+      //  ╭──╮
+      //  │tx│
+      //  ╰──╯
+      const cw = Math.max(label.length + 2, 6);
+      const cx = x + Math.floor((w - cw) / 2);
+      canvas.drawHLine(cx + 1, y, cw - 2, charset.horizontal);
+      canvas.set(cx, y, charset.roundTopLeft);
+      canvas.set(cx + cw - 1, y, charset.roundTopRight);
+      canvas.set(cx, y + 1, charset.vertical);
+      canvas.set(cx + cw - 1, y + 1, charset.vertical);
+      canvas.drawHLine(cx + 1, y + 2, cw - 2, charset.horizontal);
+      canvas.set(cx, y + 2, charset.roundBottomLeft);
+      canvas.set(cx + cw - 1, y + 2, charset.roundBottomRight);
+      canvas.drawText(cx + 1, y + 1, label.substring(0, cw - 2));
       break;
 
     case 'stadium':
-      // (-------)
-      // |  text |
-      // (-------)
-      canvas.set(x, y, '(');
-      canvas.drawHLine(x + 1, y, w - 2, '-');
-      canvas.set(x + w - 1, y, ')');
+      // ╭──────────╮
+      // │   text   │
+      // ╰──────────╯
+      canvas.drawHLine(x + 1, y, w - 2, charset.horizontal);
+      canvas.set(x, y, charset.roundTopLeft);
+      canvas.set(x + w - 1, y, charset.roundTopRight);
       for (let i = 1; i < h - 1; i++) {
-        canvas.set(x, y + i, '|');
-        canvas.set(x + w - 1, y + i, '|');
+        canvas.set(x, y + i, charset.vertical);
+        canvas.set(x + w - 1, y + i, charset.vertical);
       }
-      canvas.set(x, y + h - 1, '(');
-      canvas.drawHLine(x + 1, y + h - 1, w - 2, '-');
-      canvas.set(x + w - 1, y + h - 1, ')');
+      canvas.drawHLine(x + 1, y + h - 1, w - 2, charset.horizontal);
+      canvas.set(x, y + h - 1, charset.roundBottomLeft);
+      canvas.set(x + w - 1, y + h - 1, charset.roundBottomRight);
       canvas.drawText(labelX, labelY, label);
       break;
   }
@@ -300,10 +424,11 @@ function drawEdge(
   from: { x: number; y: number; w: number; h: number },
   to: { x: number; y: number; w: number; h: number },
   edge: FlowchartEdge,
-  isHorizontal: boolean
+  isHorizontal: boolean,
+  charset: Charset
 ): void {
-  const lineChar = edge.style === 'dotted' ? ':' : edge.style === 'thick' ? '=' : '-';
-  const vLineChar = edge.style === 'dotted' ? ':' : '|';
+  const lineChar = edge.style === 'dotted' ? '·' : charset.horizontal;
+  const vLineChar = edge.style === 'dotted' ? '·' : charset.vertical;
 
   if (isHorizontal) {
     // Draw horizontal arrow
@@ -316,7 +441,7 @@ function drawEdge(
       // Straight horizontal line
       canvas.drawHLine(startX, startY, endX - startX, lineChar);
       if (edge.arrow === 'arrow') {
-        canvas.set(endX, endY, '>');
+        canvas.set(endX, endY, charset.arrowRight);
       }
     } else {
       // Need to route around
@@ -325,7 +450,7 @@ function drawEdge(
       canvas.drawVLine(midX, Math.min(startY, endY), Math.abs(endY - startY) + 1, vLineChar);
       canvas.drawHLine(midX, endY, endX - midX, lineChar);
       if (edge.arrow === 'arrow') {
-        canvas.set(endX, endY, '>');
+        canvas.set(endX, endY, charset.arrowRight);
       }
     }
   } else {
@@ -339,7 +464,7 @@ function drawEdge(
       // Straight vertical line
       canvas.drawVLine(startX, startY, endY - startY, vLineChar);
       if (edge.arrow === 'arrow') {
-        canvas.set(endX, endY, 'v');
+        canvas.set(endX, endY, charset.arrowDown);
       }
     } else {
       // Need to route around
@@ -348,7 +473,7 @@ function drawEdge(
       canvas.drawHLine(Math.min(startX, endX), midY, Math.abs(endX - startX) + 1, lineChar);
       canvas.drawVLine(endX, midY, endY - midY, vLineChar);
       if (edge.arrow === 'arrow') {
-        canvas.set(endX, endY, 'v');
+        canvas.set(endX, endY, charset.arrowDown);
       }
     }
   }
@@ -366,7 +491,7 @@ function drawEdge(
 }
 
 // Sequence diagram renderer
-function renderSequence(diagram: SequenceDiagram): string {
+function renderSequence(diagram: SequenceDiagram, charset: Charset): string {
   const { participants, messages } = diagram;
 
   if (participants.length === 0) {
@@ -397,21 +522,21 @@ function renderSequence(diagram: SequenceDiagram): string {
     const boxX = x - Math.floor(boxWidth / 2);
 
     // Draw box
-    canvas.drawHLine(boxX, 0, boxWidth, '-');
-    canvas.set(boxX, 0, '+');
-    canvas.set(boxX + boxWidth - 1, 0, '+');
-    canvas.set(boxX, 1, '|');
-    canvas.set(boxX + boxWidth - 1, 1, '|');
+    canvas.drawHLine(boxX + 1, 0, boxWidth - 2, charset.horizontal);
+    canvas.set(boxX, 0, charset.topLeft);
+    canvas.set(boxX + boxWidth - 1, 0, charset.topRight);
+    canvas.set(boxX, 1, charset.vertical);
+    canvas.set(boxX + boxWidth - 1, 1, charset.vertical);
     canvas.drawText(boxX + 2, 1, label);
-    canvas.drawHLine(boxX, 2, boxWidth, '-');
-    canvas.set(boxX, 2, '+');
-    canvas.set(boxX + boxWidth - 1, 2, '+');
+    canvas.drawHLine(boxX + 1, 2, boxWidth - 2, charset.horizontal);
+    canvas.set(boxX, 2, charset.bottomLeft);
+    canvas.set(boxX + boxWidth - 1, 2, charset.bottomRight);
   }
 
   // Draw lifelines
   for (const participant of participants) {
     const x = participantX.get(participant.id)!;
-    canvas.drawVLine(x, 3, height - 4, '|');
+    canvas.drawVLine(x, 3, height - 4, charset.vertical);
   }
 
   // Draw messages
@@ -421,28 +546,27 @@ function renderSequence(diagram: SequenceDiagram): string {
     const fromX = participantX.get(msg.from)!;
     const toX = participantX.get(msg.to)!;
 
-    const lineChar = msg.style === 'dotted' ? '-' : '-';
-    const arrowChar = msg.arrow === 'arrow' ? '>' : '>';
+    const lineChar = msg.style === 'dotted' ? '·' : charset.horizontal;
 
     if (fromX < toX) {
       // Arrow going right
       canvas.drawHLine(fromX + 1, y, toX - fromX - 2, lineChar);
-      canvas.set(toX - 1, y, arrowChar);
+      canvas.set(toX - 1, y, charset.arrowRight);
       // Label above arrow
       const label = msg.label.substring(0, toX - fromX - 4);
       canvas.drawText(fromX + 2, y - 1, label);
     } else if (fromX > toX) {
       // Arrow going left
       canvas.drawHLine(toX + 2, y, fromX - toX - 2, lineChar);
-      canvas.set(toX + 1, y, '<');
+      canvas.set(toX + 1, y, charset.arrowLeft);
       // Label above arrow
       const label = msg.label.substring(0, fromX - toX - 4);
       canvas.drawText(toX + 3, y - 1, label);
     } else {
       // Self-message
-      canvas.drawText(fromX + 1, y, '--+');
-      canvas.set(fromX + 3, y + 1, '|');
-      canvas.drawText(fromX + 1, y + 2, '<-+');
+      canvas.drawText(fromX + 1, y, `${charset.horizontal}${charset.horizontal}${charset.topRight}`);
+      canvas.set(fromX + 3, y + 1, charset.vertical);
+      canvas.drawText(fromX + 1, y + 2, `${charset.arrowLeft}${charset.horizontal}${charset.bottomRight}`);
       canvas.drawText(fromX + 4, y, msg.label.substring(0, 10));
     }
   }
