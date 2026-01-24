@@ -15,17 +15,18 @@ type Renderer struct {
 
 // Options for rendering
 type Options struct {
-	Charset        string
-	AmbiguousWidth int
-	Direction      types.Direction
+	Charset            string
+	AmbiguousWidth     int    // Deprecated: use AmbiguousWidthMode
+	AmbiguousWidthMode string // "1", "2", "half", "full", "console", "legacy"
+	Direction          types.Direction
 }
 
 // DefaultOptions returns default rendering options
 func DefaultOptions() *Options {
 	return &Options{
-		Charset:        "unicode",
-		AmbiguousWidth: 1,
-		Direction:      types.TB,
+		Charset:            "unicode",
+		AmbiguousWidthMode: "1",
+		Direction:          types.TB,
 	}
 }
 
@@ -34,9 +35,18 @@ func New(opts *Options) *Renderer {
 	if opts == nil {
 		opts = DefaultOptions()
 	}
+
+	// Use mode-based calculator if AmbiguousWidthMode is set
+	var calc *width.Calculator
+	if opts.AmbiguousWidthMode != "" {
+		calc = width.NewCalculatorWithMode(opts.AmbiguousWidthMode)
+	} else {
+		calc = width.NewCalculator(opts.AmbiguousWidth)
+	}
+
 	return &Renderer{
 		charset: GetCharset(opts.Charset),
-		calc:    width.NewCalculator(opts.AmbiguousWidth),
+		calc:    calc,
 	}
 }
 

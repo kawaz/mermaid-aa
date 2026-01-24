@@ -5,13 +5,44 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
+// WidthMode represents the ambiguous width mode
+type WidthMode string
+
+const (
+	// ModeHalf sets ambiguous characters to half-width (1 cell)
+	ModeHalf WidthMode = "half"
+	// ModeFull sets ambiguous characters to full-width (2 cells)
+	ModeFull WidthMode = "full"
+	// ModeConsole is an alias for half (ambiguous=1, box drawing=1)
+	ModeConsole WidthMode = "console"
+	// ModeLegacy sets all ambiguous including box drawing to full-width (2 cells)
+	ModeLegacy WidthMode = "legacy"
+)
+
+// ParseWidthMode parses a width mode string
+// Returns the mode and whether box drawing should be treated as full-width
+func ParseWidthMode(s string) (ambiguousWidth int, boxDrawingFullWidth bool) {
+	switch s {
+	case "1", "half", "console":
+		return 1, false
+	case "2", "full":
+		return 2, false
+	case "legacy":
+		return 2, true
+	default:
+		return 1, false
+	}
+}
+
 // Calculator calculates string width with configurable ambiguous width
 type Calculator struct {
-	ambiguousWidth int
-	cond           *runewidth.Condition
+	ambiguousWidth      int
+	boxDrawingFullWidth bool
+	cond                *runewidth.Condition
 }
 
 // NewCalculator creates a new width calculator
+// Deprecated: Use NewCalculatorWithMode instead
 func NewCalculator(ambiguousWidth int) *Calculator {
 	if ambiguousWidth < 1 {
 		ambiguousWidth = 1
@@ -24,18 +55,50 @@ func NewCalculator(ambiguousWidth int) *Calculator {
 	cond.EastAsianWidth = ambiguousWidth == 2
 
 	return &Calculator{
-		ambiguousWidth: ambiguousWidth,
-		cond:           cond,
+		ambiguousWidth:      ambiguousWidth,
+		boxDrawingFullWidth: ambiguousWidth == 2,
+		cond:                cond,
 	}
+}
+
+// NewCalculatorWithMode creates a new width calculator with a specific mode
+func NewCalculatorWithMode(mode string) *Calculator {
+	ambiguousWidth, boxDrawingFullWidth := ParseWidthMode(mode)
+
+	cond := runewidth.NewCondition()
+	cond.EastAsianWidth = ambiguousWidth == 2
+
+	return &Calculator{
+		ambiguousWidth:      ambiguousWidth,
+		boxDrawingFullWidth: boxDrawingFullWidth,
+		cond:                cond,
+	}
+}
+
+// isBoxDrawing returns true if r is a Box Drawing character (U+2500-U+257F)
+func isBoxDrawing(r rune) bool {
+	return r >= 0x2500 && r <= 0x257F
 }
 
 // StringWidth returns the display width of a string
 func (c *Calculator) StringWidth(s string) int {
+	// If box drawing has special handling, calculate manually
+	if c.ambiguousWidth == 2 && !c.boxDrawingFullWidth {
+		width := 0
+		for _, r := range s {
+			width += c.RuneWidth(r)
+		}
+		return width
+	}
 	return c.cond.StringWidth(s)
 }
 
 // RuneWidth returns the display width of a rune
 func (c *Calculator) RuneWidth(r rune) int {
+	// Box drawing characters: treat as half-width unless in legacy mode
+	if isBoxDrawing(r) && !c.boxDrawingFullWidth {
+		return 1
+	}
 	return c.cond.RuneWidth(r)
 }
 

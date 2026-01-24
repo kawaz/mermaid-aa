@@ -27,7 +27,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	var (
 		fileFlag      = fs.String("f", "", "Read from file")
 		charsetFlag   = fs.String("c", "", "Character set [ascii|unicode|unicode-round|unicode-bold|unicode-double]")
-		ambWidthFlag  = fs.Int("a", 0, "Width for ambiguous chars (1 or 2)")
+		ambWidthFlag  = fs.String("a", "", "Width for ambiguous chars")
 		directionFlag = fs.String("d", "", "Override direction [TB|TD|BT|LR|RL]")
 		helpFlag      = fs.Bool("h", false, "Print help")
 		versionFlag   = fs.Bool("V", false, "Print version")
@@ -36,7 +36,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// Also support long flags
 	fs.StringVar(fileFlag, "file", "", "Read from file")
 	fs.StringVar(charsetFlag, "charset", "", "Character set")
-	fs.IntVar(ambWidthFlag, "ambiguous-width", 0, "Width for ambiguous chars")
+	fs.StringVar(ambWidthFlag, "ambiguous-width", "", "Width for ambiguous chars")
 	fs.StringVar(directionFlag, "direction", "", "Override direction")
 	fs.BoolVar(helpFlag, "help", false, "Print help")
 	fs.BoolVar(versionFlag, "version", false, "Print version")
@@ -107,12 +107,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	// Ambiguous width from environment or flag
 	if env := os.Getenv("MERMAID_AA_AMBIGUOUS_WIDTH"); env != "" {
-		if env == "2" {
-			opts.AmbiguousWidth = 2
-		}
+		opts.AmbiguousWidthMode = env
 	}
-	if *ambWidthFlag > 0 {
-		opts.AmbiguousWidth = *ambWidthFlag
+	if *ambWidthFlag != "" {
+		opts.AmbiguousWidthMode = *ambWidthFlag
 	}
 
 	// Direction override
@@ -141,8 +139,13 @@ Options:
   -f, --file <FILE>           Read from file
   -c, --charset <CHARSET>     Character set [default: unicode]
                               [ascii|unicode|unicode-round|unicode-bold|unicode-double]
-  -a, --ambiguous-width <N>   Width for ambiguous chars [default: 1]
-                              [1: half-width, 2: full-width]
+  -a, --ambiguous-width <W>   Width for East Asian Ambiguous characters [default: 1]
+
+                              Values:
+                                1, half     Half-width (1 cell) - for Western terminals
+                                2, full     Full-width (2 cells) - for CJK terminals
+                                console     Ambiguous=1, Box Drawing=1 (recommended)
+                                legacy      All ambiguous including Box Drawing=2
   -d, --direction <DIR>       Override direction [TB|TD|BT|LR|RL]
   -h, --help                  Print help
   -V, --version               Print version
@@ -160,7 +163,7 @@ Examples:
   mermaid-aa 'graph TD; A-->B'
   mermaid-aa -f diagram.mmd
   echo 'graph LR; A-->B' | mermaid-aa
-  mermaid-aa -c ascii -a 2 'graph TD; A[日本語]-->B'
+  mermaid-aa -c ascii -a full 'graph TD; A[日本語]-->B'
 `
 	fmt.Fprint(w, help)
 }
