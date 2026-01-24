@@ -31,9 +31,15 @@ struct Args {
     #[arg(short, long, default_value = "unicode", env = "MERMAID_AA_CHARSET")]
     charset: String,
 
-    /// Width for ambiguous chars (1: half-width, 2: full-width)
+    /// Width for East Asian Ambiguous characters
+    ///
+    /// Values:
+    ///   1, half     Half-width (1 cell) - for Western terminals
+    ///   2, full     Full-width (2 cells) - for CJK terminals
+    ///   console     Ambiguous=1, Box Drawing=1 (recommended)
+    ///   legacy      All ambiguous including Box Drawing=2
     #[arg(short, long, default_value = "1", env = "MERMAID_AA_AMBIGUOUS_WIDTH")]
-    ambiguous_width: u8,
+    ambiguous_width: String,
 
     /// Override direction (TB, TD, BT, LR, RL)
     #[arg(short, long)]
@@ -53,7 +59,13 @@ fn main() -> ExitCode {
     };
 
     // Parse ambiguous width
-    let ambiguous_width = AmbiguousWidth::from(args.ambiguous_width);
+    let ambiguous_width = match args.ambiguous_width.parse::<AmbiguousWidth>() {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            return ExitCode::from(3);
+        }
+    };
 
     // Parse direction override
     let direction_override = args
