@@ -1,0 +1,18 @@
+[package]
+name = "mermaid-aa"
+version = "0.1.0"
+edition = "2021"
+description = "Convert Mermaid diagrams to ASCII Art"
+license = "MIT"
+repository = "https://github.com/kawaz/mermaid-aa"
+
+[[bin]]
+name = "mermaid-aa"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+unicode-width = "0.2"
+
+[dev-dependencies]
+pretty_assertions = "1"
