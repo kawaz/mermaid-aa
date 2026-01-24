@@ -1,6 +1,105 @@
 // Package types defines common types for mermaid-aa
 package types
 
+import (
+	"fmt"
+	"strings"
+)
+
+// Position represents a position in the source code
+type Position struct {
+	Line   int // 1-indexed
+	Column int // 1-indexed
+}
+
+// ParseError represents a parse error with location information
+type ParseError struct {
+	Position Position
+	Message  string
+	Source   string // the line content where error occurred
+	Hint     string // optional help message
+	Length   int    // length of the error span for underlining
+}
+
+// Error implements the error interface
+func (e *ParseError) Error() string {
+	return fmt.Sprintf("line %d:%d: %s", e.Position.Line, e.Position.Column, e.Message)
+}
+
+// Format returns a formatted error message with visual display
+func (e *ParseError) Format(filename string) string {
+	var sb strings.Builder
+
+	// Error header
+	sb.WriteString(fmt.Sprintf("Error: %s\n", e.Message))
+	sb.WriteString(fmt.Sprintf(" --> %s:%d:%d\n", filename, e.Position.Line, e.Position.Column))
+
+	// Line number width
+	lineNumStr := fmt.Sprintf("%d", e.Position.Line)
+	padding := strings.Repeat(" ", len(lineNumStr))
+
+	// Empty line with bar
+	sb.WriteString(fmt.Sprintf("%s |\n", padding))
+
+	// Source line
+	sb.WriteString(fmt.Sprintf("%d | %s\n", e.Position.Line, e.Source))
+
+	// Error pointer line
+	if e.Length <= 0 {
+		e.Length = 1
+	}
+	spaces := strings.Repeat(" ", e.Position.Column-1)
+	carets := strings.Repeat("^", e.Length)
+	sb.WriteString(fmt.Sprintf("%s | %s%s\n", padding, spaces, carets))
+
+	// Help hint
+	if e.Hint != "" {
+		sb.WriteString(fmt.Sprintf("%s |\n", padding))
+		sb.WriteString(fmt.Sprintf("%s = help: %s\n", padding, e.Hint))
+	}
+
+	return sb.String()
+}
+
+// ParseErrors holds multiple parse errors
+type ParseErrors struct {
+	Errors   []*ParseError
+	Filename string
+}
+
+// Error implements the error interface
+func (e *ParseErrors) Error() string {
+	if len(e.Errors) == 0 {
+		return ""
+	}
+	if len(e.Errors) == 1 {
+		return e.Errors[0].Error()
+	}
+	return fmt.Sprintf("%d errors found", len(e.Errors))
+}
+
+// Format returns all formatted error messages
+func (e *ParseErrors) Format() string {
+	var sb strings.Builder
+	for i, err := range e.Errors {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(err.Format(e.Filename))
+	}
+	return sb.String()
+}
+
+// HasErrors returns true if there are any errors
+func (e *ParseErrors) HasErrors() bool {
+	return len(e.Errors) > 0
+}
+
+// Add adds a new error
+func (e *ParseErrors) Add(err *ParseError) {
+	e.Errors = append(e.Errors, err)
+}
+
 // Direction represents the flowchart direction
 type Direction int
 

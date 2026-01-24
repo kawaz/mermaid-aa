@@ -88,9 +88,18 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	// Parse the flowchart
-	fc, err := parser.ParseFlowchart(input)
+	filename := "input"
+	if *fileFlag != "" {
+		filename = *fileFlag
+	}
+	fc, err := parser.ParseFlowchartWithFilename(input, filename)
 	if err != nil {
-		fmt.Fprintf(stderr, "Error: %v\n", err)
+		// Check if it's a ParseErrors for formatted output
+		if parseErrs, ok := err.(*types.ParseErrors); ok {
+			fmt.Fprint(stderr, parseErrs.Format())
+		} else {
+			fmt.Fprintf(stderr, "Error: %v\n", err)
+		}
 		return 1
 	}
 

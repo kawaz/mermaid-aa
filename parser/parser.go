@@ -9,11 +9,17 @@ import (
 )
 
 // Parser parses Mermaid flowchart syntax
-type Parser struct{}
+type Parser struct {
+	errors     *types.ParseErrors
+	lines      []string
+	currentLine int
+}
 
 // New creates a new parser
 func New() *Parser {
-	return &Parser{}
+	return &Parser{
+		errors: &types.ParseErrors{Filename: "input.mmd"},
+	}
 }
 
 // Regular expressions for parsing
@@ -48,19 +54,42 @@ var (
 		{regexp.MustCompile(`^\s*---(?:\|([^|]*)\|)?`), types.Open},          // ---
 	}
 
+	// Match incomplete edges (for error detection)
+	incompleteEdgeRe = regexp.MustCompile(`^\s*(-->|-.->|==>|---)\s*$`)
+
 	// Simple node ID
 	nodeIDRe = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)`)
+
+	// Unclosed brackets patterns (for error detection)
+	unclosedBracketPatterns = []struct {
+		re      *regexp.Regexp
+		message string
+		hint    string
+	}{
+		{regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\[([^\]]*$)`), "unclosed bracket '['", "add closing ']' to complete the node definition"},
+		{regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\(([^\)]*$)`), "unclosed parenthesis '('", "add closing ')' to complete the node definition"},
+		{regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\{([^\}]*$)`), "unclosed brace '{'", "add closing '}' to complete the node definition"},
+	}
 )
+
+// SetFilename sets the filename for error messages
+func (p *Parser) SetFilename(filename string) {
+	p.errors.Filename = filename
+}
 
 // Parse parses a Mermaid flowchart string
 func (p *Parser) Parse(input string) (*types.Flowchart, error) {
 	fc := types.NewFlowchart()
+	p.errors = &types.ParseErrors{Filename: p.errors.Filename}
 
 	// Normalize input: replace semicolons with newlines
 	input = strings.ReplaceAll(input, ";", "\n")
-	lines := strings.Split(input, "\n")
+	p.lines = strings.Split(input, "\n")
 
-	for _, line := range lines {
+	hasHeader := false
+	for lineNum, line := range p.lines {
+		p.currentLine = lineNum + 1 // 1-indexed
+		originalLine := line
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "%%") {
 			continue
@@ -68,6 +97,7 @@ func (p *Parser) Parse(input string) (*types.Flowchart, error) {
 
 		// Check for header
 		if matches := headerRe.FindStringSubmatch(line); matches != nil {
+			hasHeader = true
 			if matches[1] != "" {
 				fc.Direction = types.ParseDirection(matches[1])
 			}
@@ -75,23 +105,41 @@ func (p *Parser) Parse(input string) (*types.Flowchart, error) {
 		}
 
 		// Parse statements (nodes and edges)
-		p.parseStatement(line, fc)
+		p.parseStatement(line, originalLine, fc)
+	}
+
+	// Warn if no header found (not an error, but good to know)
+	if !hasHeader && len(p.lines) > 0 {
+		// This is just a warning; Mermaid allows implicit graph
+	}
+
+	if p.errors.HasErrors() {
+		return fc, p.errors
 	}
 
 	return fc, nil
 }
 
-func (p *Parser) parseStatement(line string, fc *types.Flowchart) {
+func (p *Parser) parseStatement(line, originalLine string, fc *types.Flowchart) {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return
 	}
 
+	// Check for unclosed brackets first
+	for _, pat := range unclosedBracketPatterns {
+		if matches := pat.re.FindStringSubmatch(line); matches != nil {
+			col := strings.Index(originalLine, line) + len(matches[1]) + 1
+			p.addError(col, len(line)-len(matches[1]), pat.message, pat.hint, originalLine)
+			return
+		}
+	}
+
 	// Try to parse as a chain of nodes and edges: A --> B --> C
-	p.parseChain(line, fc)
+	p.parseChain(line, originalLine, fc)
 }
 
-func (p *Parser) parseChain(line string, fc *types.Flowchart) {
+func (p *Parser) parseChain(line, originalLine string, fc *types.Flowchart) {
 	var nodes []*types.Node
 	var edges []struct {
 		style types.EdgeStyle
@@ -99,8 +147,16 @@ func (p *Parser) parseChain(line string, fc *types.Flowchart) {
 	}
 
 	remaining := line
+	startOffset := strings.Index(originalLine, line)
+	if startOffset < 0 {
+		startOffset = 0
+	}
+	currentOffset := startOffset
+
 	for remaining != "" {
-		remaining = strings.TrimSpace(remaining)
+		trimmed := strings.TrimLeft(remaining, " \t")
+		currentOffset += len(remaining) - len(trimmed)
+		remaining = trimmed
 		if remaining == "" {
 			break
 		}
@@ -110,17 +166,38 @@ func (p *Parser) parseChain(line string, fc *types.Flowchart) {
 		if node != nil {
 			nodes = append(nodes, node)
 			remaining = remaining[consumed:]
-			remaining = strings.TrimSpace(remaining)
+			currentOffset += consumed
+			trimmed = strings.TrimLeft(remaining, " \t")
+			currentOffset += len(remaining) - len(trimmed)
+			remaining = trimmed
 
 			// Try to parse an edge after the node
 			edge, edgeLabel, edgeConsumed := p.parseEdge(remaining)
 			if edgeConsumed > 0 {
+				// Check if edge is incomplete (no target node)
+				afterEdge := strings.TrimSpace(remaining[edgeConsumed:])
+				if afterEdge == "" {
+					// Edge at end of line without target
+					edgeCol := currentOffset + 1
+					edgeLen := edgeConsumed
+					p.addError(edgeCol, edgeLen, "missing node identifier after arrow",
+						"add a target node after the arrow, e.g., 'A --> B'", originalLine)
+					return
+				}
+
 				edges = append(edges, struct {
 					style types.EdgeStyle
 					label string
 				}{edge, edgeLabel})
 				remaining = remaining[edgeConsumed:]
+				currentOffset += edgeConsumed
 			} else if remaining != "" {
+				// Check if this looks like an invalid edge
+				if strings.HasPrefix(remaining, "-") || strings.HasPrefix(remaining, "=") {
+					p.addError(currentOffset+1, len(remaining), "invalid edge syntax",
+						"use '-->', '-.->',  '==>', or '---' for edges", originalLine)
+					return
+				}
 				// If no edge found and there's remaining text, break
 				break
 			}
@@ -130,20 +207,45 @@ func (p *Parser) parseChain(line string, fc *types.Flowchart) {
 				id := matches[1]
 				nodes = append(nodes, &types.Node{ID: id, Label: id, Shape: types.Rectangle})
 				remaining = remaining[len(matches[0]):]
-				remaining = strings.TrimSpace(remaining)
+				currentOffset += len(matches[0])
+				trimmed = strings.TrimLeft(remaining, " \t")
+				currentOffset += len(remaining) - len(trimmed)
+				remaining = trimmed
 
 				// Try to parse an edge
 				edge, edgeLabel, edgeConsumed := p.parseEdge(remaining)
 				if edgeConsumed > 0 {
+					// Check if edge is incomplete
+					afterEdge := strings.TrimSpace(remaining[edgeConsumed:])
+					if afterEdge == "" {
+						edgeCol := currentOffset + 1
+						edgeLen := edgeConsumed
+						p.addError(edgeCol, edgeLen, "missing node identifier after arrow",
+							"add a target node after the arrow, e.g., 'A --> B'", originalLine)
+						return
+					}
+
 					edges = append(edges, struct {
 						style types.EdgeStyle
 						label string
 					}{edge, edgeLabel})
 					remaining = remaining[edgeConsumed:]
+					currentOffset += edgeConsumed
 				} else if remaining != "" {
+					// Check for invalid syntax after node ID
+					if strings.HasPrefix(remaining, "-") || strings.HasPrefix(remaining, "=") {
+						p.addError(currentOffset+1, len(remaining), "invalid edge syntax",
+							"use '-->', '-.->',  '==>', or '---' for edges", originalLine)
+						return
+					}
 					break
 				}
 			} else {
+				// Unable to parse - report error
+				if remaining != "" {
+					p.addError(currentOffset+1, len(remaining), "unexpected token",
+						"expected a node identifier (e.g., 'A', 'Node1')", originalLine)
+				}
 				break
 			}
 		}
@@ -193,7 +295,24 @@ func (p *Parser) parseEdge(s string) (types.EdgeStyle, string, int) {
 	return types.SolidArrow, "", 0
 }
 
+func (p *Parser) addError(col, length int, message, hint, sourceLine string) {
+	p.errors.Add(&types.ParseError{
+		Position: types.Position{Line: p.currentLine, Column: col},
+		Message:  message,
+		Source:   sourceLine,
+		Hint:     hint,
+		Length:   length,
+	})
+}
+
 // ParseFlowchart is a convenience function to parse a flowchart
 func ParseFlowchart(input string) (*types.Flowchart, error) {
 	return New().Parse(input)
+}
+
+// ParseFlowchartWithFilename parses a flowchart with a specific filename for error messages
+func ParseFlowchartWithFilename(input, filename string) (*types.Flowchart, error) {
+	parser := New()
+	parser.SetFilename(filename)
+	return parser.Parse(input)
 }

@@ -164,3 +164,126 @@ func TestParseMultiLine(t *testing.T) {
 		t.Errorf("edges count = %d, want 2", len(fc.Edges))
 	}
 }
+
+func TestParseErrorMissingNodeAfterArrow(t *testing.T) {
+	input := "graph TD; A -->"
+	_, err := ParseFlowchart(input)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	parseErrs, ok := err.(*types.ParseErrors)
+	if !ok {
+		t.Fatalf("expected *types.ParseErrors, got %T", err)
+	}
+
+	if len(parseErrs.Errors) != 1 {
+		t.Fatalf("expected 1 error, got %d", len(parseErrs.Errors))
+	}
+
+	if parseErrs.Errors[0].Message != "missing node identifier after arrow" {
+		t.Errorf("unexpected message: %s", parseErrs.Errors[0].Message)
+	}
+}
+
+func TestParseErrorUnclosedBracket(t *testing.T) {
+	input := "graph TD; A[Hello"
+	_, err := ParseFlowchart(input)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	parseErrs, ok := err.(*types.ParseErrors)
+	if !ok {
+		t.Fatalf("expected *types.ParseErrors, got %T", err)
+	}
+
+	if len(parseErrs.Errors) != 1 {
+		t.Fatalf("expected 1 error, got %d", len(parseErrs.Errors))
+	}
+
+	if parseErrs.Errors[0].Message != "unclosed bracket '['" {
+		t.Errorf("unexpected message: %s", parseErrs.Errors[0].Message)
+	}
+}
+
+func TestParseErrorInvalidEdgeSyntax(t *testing.T) {
+	input := "graph TD; A->B"
+	_, err := ParseFlowchart(input)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	parseErrs, ok := err.(*types.ParseErrors)
+	if !ok {
+		t.Fatalf("expected *types.ParseErrors, got %T", err)
+	}
+
+	if len(parseErrs.Errors) != 1 {
+		t.Fatalf("expected 1 error, got %d", len(parseErrs.Errors))
+	}
+
+	if parseErrs.Errors[0].Message != "invalid edge syntax" {
+		t.Errorf("unexpected message: %s", parseErrs.Errors[0].Message)
+	}
+}
+
+func TestParseErrorMultiple(t *testing.T) {
+	input := `graph TD
+    A -->
+    B[Unclosed`
+
+	_, err := ParseFlowchart(input)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	parseErrs, ok := err.(*types.ParseErrors)
+	if !ok {
+		t.Fatalf("expected *types.ParseErrors, got %T", err)
+	}
+
+	if len(parseErrs.Errors) != 2 {
+		t.Fatalf("expected 2 errors, got %d", len(parseErrs.Errors))
+	}
+}
+
+func TestParseErrorFormat(t *testing.T) {
+	_, err := ParseFlowchartWithFilename("graph TD; A -->", "test.mmd")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	parseErrs, ok := err.(*types.ParseErrors)
+	if !ok {
+		t.Fatalf("expected *types.ParseErrors, got %T", err)
+	}
+
+	formatted := parseErrs.Format()
+	if formatted == "" {
+		t.Fatal("expected formatted error, got empty string")
+	}
+
+	// Check that the filename appears in the output
+	if !contains(formatted, "test.mmd") {
+		t.Errorf("expected filename in output, got: %s", formatted)
+	}
+
+	// Check that help hint appears
+	if !contains(formatted, "= help:") {
+		t.Errorf("expected help hint in output, got: %s", formatted)
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
