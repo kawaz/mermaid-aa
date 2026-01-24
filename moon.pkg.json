@@ -1,0 +1,8 @@
+{
+  "import": [
+    "kawaz/mermaid_aa/src/types",
+    "kawaz/mermaid_aa/src/width",
+    "kawaz/mermaid_aa/src/parser",
+    "kawaz/mermaid_aa/src/renderer"
+  ]
+}
