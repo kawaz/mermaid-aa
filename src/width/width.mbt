@@ -39,10 +39,16 @@ fn is_fullwidth(cp : Int) -> Bool {
   (cp >= 0xFE30 && cp <= 0xFE4F)       // CJK Compatibility Forms
 }
 
+/// Check if a character is a Box Drawing character (U+2500-U+257F)
+/// These are treated specially in some width modes
+fn is_box_drawing(cp : Int) -> Bool {
+  cp >= 0x2500 && cp <= 0x257F
+}
+
 /// Check if a character is ambiguous width
 /// These characters are width 1 or 2 depending on context
 fn is_ambiguous(cp : Int) -> Bool {
-  // Box Drawing
+  // Box Drawing (also ambiguous, but handled separately)
   (cp >= 0x2500 && cp <= 0x257F) ||
   // Block Elements
   (cp >= 0x2580 && cp <= 0x259F) ||
@@ -106,6 +112,22 @@ pub fn char_width(ch : Char, ambiguous_width : Int) -> Int {
   }
 }
 
+/// Calculate display width of a single character using WidthMode
+pub fn char_width_mode(ch : Char, mode : @types.WidthMode) -> Int {
+  let cp = ch.to_int()
+  if is_zero_width(cp) {
+    0
+  } else if is_fullwidth(cp) {
+    2
+  } else if is_box_drawing(cp) {
+    mode.box_drawing_width()
+  } else if is_ambiguous(cp) {
+    mode.ambiguous_width()
+  } else {
+    1
+  }
+}
+
 /// Calculate display width of a string
 pub fn string_width(s : String, ambiguous_width : Int) -> Int {
   let mut width = 0
@@ -115,9 +137,34 @@ pub fn string_width(s : String, ambiguous_width : Int) -> Int {
   width
 }
 
+/// Calculate display width of a string using WidthMode
+pub fn string_width_mode(s : String, mode : @types.WidthMode) -> Int {
+  let mut width = 0
+  for i = 0; i < s.length(); i = i + 1 {
+    width = width + char_width_mode(char_at(s, i), mode)
+  }
+  width
+}
+
 /// Pad a string to a given display width (left-aligned)
 pub fn pad_right(s : String, target_width : Int, ambiguous_width : Int) -> String {
   let current_width = string_width(s, ambiguous_width)
+  if current_width >= target_width {
+    s
+  } else {
+    let padding = target_width - current_width
+    let result = StringBuilder::new()
+    result.write_string(s)
+    for i = 0; i < padding; i = i + 1 {
+      result.write_char(' ')
+    }
+    result.to_string()
+  }
+}
+
+/// Pad a string to a given display width (left-aligned) using WidthMode
+pub fn pad_right_mode(s : String, target_width : Int, mode : @types.WidthMode) -> String {
+  let current_width = string_width_mode(s, mode)
   if current_width >= target_width {
     s
   } else {
@@ -152,9 +199,46 @@ pub fn pad_center(s : String, target_width : Int, ambiguous_width : Int) -> Stri
   }
 }
 
+/// Pad a string to a given display width (centered) using WidthMode
+pub fn pad_center_mode(s : String, target_width : Int, mode : @types.WidthMode) -> String {
+  let current_width = string_width_mode(s, mode)
+  if current_width >= target_width {
+    s
+  } else {
+    let padding = target_width - current_width
+    let left_padding = padding / 2
+    let right_padding = padding - left_padding
+    let result = StringBuilder::new()
+    for i = 0; i < left_padding; i = i + 1 {
+      result.write_char(' ')
+    }
+    result.write_string(s)
+    for i = 0; i < right_padding; i = i + 1 {
+      result.write_char(' ')
+    }
+    result.to_string()
+  }
+}
+
 /// Pad a string to a given display width (right-aligned)
 pub fn pad_left(s : String, target_width : Int, ambiguous_width : Int) -> String {
   let current_width = string_width(s, ambiguous_width)
+  if current_width >= target_width {
+    s
+  } else {
+    let padding = target_width - current_width
+    let result = StringBuilder::new()
+    for i = 0; i < padding; i = i + 1 {
+      result.write_char(' ')
+    }
+    result.write_string(s)
+    result.to_string()
+  }
+}
+
+/// Pad a string to a given display width (right-aligned) using WidthMode
+pub fn pad_left_mode(s : String, target_width : Int, mode : @types.WidthMode) -> String {
+  let current_width = string_width_mode(s, mode)
   if current_width >= target_width {
     s
   } else {

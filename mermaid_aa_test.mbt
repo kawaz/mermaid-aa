@@ -42,10 +42,70 @@ test "string width - CJK" {
 }
 
 ///|
-test "string width - ambiguous" {
+test "string width - ambiguous (legacy API)" {
   // Box drawing characters are ambiguous
   inspect!(@width.string_width("───", 1), content="3")
   inspect!(@width.string_width("───", 2), content="6")
+}
+
+///|
+test "WidthMode parsing" {
+  // half / 1
+  inspect(@types.WidthMode::from_string("1"), content="Some(Half)")
+  inspect(@types.WidthMode::from_string("half"), content="Some(Half)")
+  inspect(@types.WidthMode::from_string("Half"), content="Some(Half)")
+  // full / 2
+  inspect(@types.WidthMode::from_string("2"), content="Some(Full)")
+  inspect(@types.WidthMode::from_string("full"), content="Some(Full)")
+  inspect(@types.WidthMode::from_string("FULL"), content="Some(Full)")
+  // console
+  inspect(@types.WidthMode::from_string("console"), content="Some(Console)")
+  // legacy
+  inspect(@types.WidthMode::from_string("legacy"), content="Some(Legacy)")
+  // invalid
+  inspect(@types.WidthMode::from_string("invalid"), content="None")
+}
+
+///|
+test "WidthMode - ambiguous_width" {
+  inspect(@types.Half.ambiguous_width(), content="1")
+  inspect(@types.Full.ambiguous_width(), content="2")
+  inspect(@types.Console.ambiguous_width(), content="1")
+  inspect(@types.Legacy.ambiguous_width(), content="2")
+}
+
+///|
+test "WidthMode - box_drawing_width" {
+  inspect(@types.Half.box_drawing_width(), content="1")
+  inspect(@types.Full.box_drawing_width(), content="1")
+  inspect(@types.Console.box_drawing_width(), content="1")
+  inspect(@types.Legacy.box_drawing_width(), content="2")
+}
+
+///|
+test "string_width_mode - box drawing" {
+  // Box drawing: U+2500 (─)
+  // Half mode: box drawing = 1
+  inspect(@width.string_width_mode("───", @types.Half), content="3")
+  // Full mode: box drawing = 1 (not 2!)
+  inspect(@width.string_width_mode("───", @types.Full), content="3")
+  // Console mode: box drawing = 1
+  inspect(@width.string_width_mode("───", @types.Console), content="3")
+  // Legacy mode: box drawing = 2
+  inspect(@width.string_width_mode("───", @types.Legacy), content="6")
+}
+
+///|
+test "string_width_mode - other ambiguous" {
+  // Greek letter alpha (U+03B1): ambiguous, not box drawing
+  // Half mode: ambiguous = 1
+  inspect(@width.string_width_mode("αβγ", @types.Half), content="3")
+  // Full mode: ambiguous = 2
+  inspect(@width.string_width_mode("αβγ", @types.Full), content="6")
+  // Console mode: ambiguous = 1
+  inspect(@width.string_width_mode("αβγ", @types.Console), content="3")
+  // Legacy mode: ambiguous = 2
+  inspect(@width.string_width_mode("αβγ", @types.Legacy), content="6")
 }
 
 ///|

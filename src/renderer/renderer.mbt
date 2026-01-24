@@ -12,9 +12,9 @@ priv struct NodeLayout {
 /// Calculate node dimensions based on shape and label
 fn calc_node_size(
   node : @types.Node,
-  ambiguous_width : Int
+  mode : @types.WidthMode
 ) -> (Int, Int) {
-  let label_width = @width.string_width(node.label(), ambiguous_width)
+  let label_width = @width.string_width_mode(node.label(), mode)
   // Add padding around label
   let padding = 2  // 1 char each side
   match node.shape() {
@@ -53,14 +53,14 @@ fn draw_node(
   canvas : Canvas,
   layout : NodeLayout,
   style : CharStyle,
-  ambiguous_width : Int
+  mode : @types.WidthMode
 ) -> Unit {
   let x = layout.x
   let y = layout.y
   let w = layout.width
   let h = layout.height
   let label = layout.node.label()
-  let label_x = x + (w - @width.string_width(label, ambiguous_width)) / 2
+  let label_x = x + (w - @width.string_width_mode(label, mode)) / 2
   let label_y = y + h / 2
   match layout.node.shape() {
     @types.Rectangle => {
@@ -243,7 +243,7 @@ fn draw_edge(
       match edge.label() {
         Some(label) => {
           let mid_x = (from_x + to_x) / 2 -
-            @width.string_width(label, canvas.ambiguous_width) / 2
+            @width.string_width_mode(label, canvas.width_mode) / 2
           canvas.draw_text(mid_x, from_y - 1, label)
         }
         None => ()
@@ -275,7 +275,7 @@ fn draw_edge(
 /// Calculate layout for all nodes
 fn calc_layout(
   flowchart : @types.Flowchart,
-  ambiguous_width : Int
+  mode : @types.WidthMode
 ) -> (Array[NodeLayout], Int, Int) {
   let layouts : Array[NodeLayout] = []
   let direction = flowchart.direction()
@@ -284,7 +284,7 @@ fn calc_layout(
   // Calculate node sizes first
   let node_sizes : Array[(Int, Int)] = []
   for node in nodes {
-    node_sizes.push(calc_node_size(node, ambiguous_width))
+    node_sizes.push(calc_node_size(node, mode))
   }
   // Simple layout algorithm
   let spacing = 4  // Space between nodes
@@ -345,11 +345,9 @@ pub fn render(
   if nodes.is_empty() {
     return ""
   }
-  let (layouts, canvas_width, canvas_height) = calc_layout(
-    flowchart,
-    options.ambiguous_width(),
-  )
-  let canvas = Canvas::new(canvas_width, canvas_height, options.ambiguous_width())
+  let mode = options.width_mode()
+  let (layouts, canvas_width, canvas_height) = calc_layout(flowchart, mode)
+  let canvas = Canvas::new_with_mode(canvas_width, canvas_height, mode)
   let style = get_style(options.charset())
   // Draw edges first (so nodes draw over them)
   for edge in flowchart.edges() {
@@ -361,7 +359,7 @@ pub fn render(
   }
   // Draw nodes
   for layout in layouts {
-    draw_node(canvas, layout, style, options.ambiguous_width())
+    draw_node(canvas, layout, style, mode)
   }
   canvas.to_string()
 }

@@ -10,11 +10,17 @@ pub struct Canvas {
   width : Int
   height : Int
   cells : Array[Array[Char]]
-  ambiguous_width : Int
+  width_mode : @types.WidthMode
 }
 
 /// Create a new canvas
 pub fn Canvas::new(width : Int, height : Int, ambiguous_width : Int) -> Canvas {
+  let mode : @types.WidthMode = if ambiguous_width == 2 { @types.Full } else { @types.Half }
+  Canvas::new_with_mode(width, height, mode)
+}
+
+/// Create a new canvas with WidthMode
+pub fn Canvas::new_with_mode(width : Int, height : Int, mode : @types.WidthMode) -> Canvas {
   let cells : Array[Array[Char]] = []
   for y = 0; y < height; y = y + 1 {
     let row : Array[Char] = []
@@ -23,7 +29,7 @@ pub fn Canvas::new(width : Int, height : Int, ambiguous_width : Int) -> Canvas {
     }
     cells.push(row)
   }
-  { width, height, cells, ambiguous_width }
+  { width, height, cells, width_mode: mode }
 }
 
 /// Get character at position
@@ -74,7 +80,7 @@ pub fn Canvas::draw_text(self : Canvas, x : Int, y : Int, text : String) -> Unit
   for i = 0; i < text.length(); i = i + 1 {
     let ch = char_at(text, i)
     self.set(col, y, ch)
-    col = col + @width.char_width(ch, self.ambiguous_width)
+    col = col + @width.char_width_mode(ch, self.width_mode)
   }
 }
 
