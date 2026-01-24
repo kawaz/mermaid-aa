@@ -1,0 +1,7 @@
+graph TD
+    A[Start] --> B{Decision}
+    B -->|Yes| C[Path A]
+    B -->|No| D[Path B]
+    C --> E[Merge]
+    D --> E
+    E --> F[End]
