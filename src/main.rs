@@ -83,10 +83,11 @@ fn main() -> ExitCode {
     };
 
     // Parse mermaid diagram
+    let filename = get_input_filename(&args);
     let flowchart = match parse(&input) {
         Ok(fc) => fc,
         Err(e) => {
-            eprintln!("Error: {}", e);
+            eprint!("{}", e.format_visual(&filename));
             return ExitCode::from(1);
         }
     };
@@ -102,6 +103,19 @@ fn main() -> ExitCode {
     println!("{}", output);
 
     ExitCode::SUCCESS
+}
+
+fn get_input_filename(args: &Args) -> String {
+    if let Some(path) = &args.file {
+        return path.display().to_string();
+    }
+    if let Some(input) = &args.input {
+        let path = PathBuf::from(input);
+        if path.exists() && path.is_file() {
+            return input.clone();
+        }
+    }
+    "<stdin>".to_string()
 }
 
 fn get_input(args: &Args) -> io::Result<String> {

@@ -8,15 +8,89 @@ pub struct ParseError {
     pub message: String,
     pub line: usize,
     pub column: usize,
+    pub source_line: Option<String>,
+    pub span_len: usize,
+    pub help: Option<String>,
+}
+
+impl ParseError {
+    fn new(message: impl Into<String>, line: usize, column: usize) -> Self {
+        Self {
+            message: message.into(),
+            line,
+            column,
+            source_line: None,
+            span_len: 1,
+            help: None,
+        }
+    }
+
+    fn with_source(mut self, source: impl Into<String>) -> Self {
+        self.source_line = Some(source.into());
+        self
+    }
+
+    fn with_span(mut self, len: usize) -> Self {
+        self.span_len = len.max(1);
+        self
+    }
+
+    fn with_help(mut self, help: impl Into<String>) -> Self {
+        self.help = Some(help.into());
+        self
+    }
+
+    /// Format error in Rust compiler style.
+    pub fn format_visual(&self, filename: &str) -> String {
+        let mut output = String::new();
+
+        // Error header
+        output.push_str(&format!("error: {}\n", self.message));
+
+        // Location
+        output.push_str(&format!(
+            "  --> {}:{}:{}\n",
+            filename, self.line, self.column
+        ));
+
+        if let Some(ref source) = self.source_line {
+            let line_num_width = self.line.to_string().len();
+
+            // Empty line with pipe
+            output.push_str(&format!("{:>width$} |\n", "", width = line_num_width));
+
+            // Source line
+            output.push_str(&format!(
+                "{:>width$} | {}\n",
+                self.line,
+                source,
+                width = line_num_width
+            ));
+
+            // Error pointer
+            let pointer = "^".repeat(self.span_len);
+            output.push_str(&format!(
+                "{:>width$} | {:>col$}{}\n",
+                "",
+                "",
+                pointer,
+                width = line_num_width,
+                col = self.column.saturating_sub(1)
+            ));
+        }
+
+        // Help message
+        if let Some(ref help) = self.help {
+            output.push_str(&format!("  = help: {}\n", help));
+        }
+
+        output
+    }
 }
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Parse error at line {}, column {}: {}",
-            self.line, self.column, self.message
-        )
+        write!(f, "{}", self.format_visual("input.mmd"))
     }
 }
 
@@ -56,7 +130,9 @@ pub fn parse(input: &str) -> Result<Flowchart, ParseError> {
 }
 
 /// Returns (direction, start_line_index, optional_remaining_text_on_declaration_line)
-fn find_flowchart_declaration(lines: &[&str]) -> Result<(Direction, usize, Option<String>), ParseError> {
+fn find_flowchart_declaration(
+    lines: &[&str],
+) -> Result<(Direction, usize, Option<String>), ParseError> {
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
         if trimmed.starts_with("flowchart") || trimmed.starts_with("graph") {
@@ -64,7 +140,14 @@ fn find_flowchart_declaration(lines: &[&str]) -> Result<(Direction, usize, Optio
             let (decl_part, remaining) = if let Some(semicolon_pos) = trimmed.find(';') {
                 let decl = &trimmed[..semicolon_pos];
                 let rest = trimmed[semicolon_pos + 1..].trim();
-                (decl, if rest.is_empty() { None } else { Some(rest.to_string()) })
+                (
+                    decl,
+                    if rest.is_empty() {
+                        None
+                    } else {
+                        Some(rest.to_string())
+                    },
+                )
             } else {
                 (trimmed, None)
             };
@@ -78,40 +161,43 @@ fn find_flowchart_declaration(lines: &[&str]) -> Result<(Direction, usize, Optio
             return Ok((direction, i + 1, remaining));
         }
     }
-    Err(ParseError {
-        message: "No flowchart or graph declaration found".to_string(),
-        line: 1,
-        column: 1,
-    })
+    Err(
+        ParseError::new("No flowchart or graph declaration found", 1, 1)
+            .with_help("Start your diagram with 'flowchart TD' or 'graph LR'"),
+    )
 }
 
 fn parse_statement(
     line: &str,
     flowchart: &mut Flowchart,
-    _line_num: usize,
+    line_num: usize,
 ) -> Result<(), ParseError> {
     // Remove trailing semicolon
+    let original_line = line;
     let line = line.trim_end_matches(';').trim();
 
     // Try to parse as chain edge (A --> B --> C --> D)
-    let edges = try_parse_chain_edge(line);
-    if !edges.is_empty() {
-        for (from_node, to_node, style, label) in edges {
-            // Extract IDs before moving nodes
-            let from_id = from_node.id.clone();
-            let to_id = to_node.id.clone();
+    match try_parse_chain_edge(line, line_num, original_line) {
+        Ok(edges) if !edges.is_empty() => {
+            for (from_node, to_node, style, label) in edges {
+                // Extract IDs before moving nodes
+                let from_id = from_node.id.clone();
+                let to_id = to_node.id.clone();
 
-            // Add nodes if they don't exist (or update if they have labels)
-            add_or_update_node(flowchart, from_node);
-            add_or_update_node(flowchart, to_node);
+                // Add nodes if they don't exist (or update if they have labels)
+                add_or_update_node(flowchart, from_node);
+                add_or_update_node(flowchart, to_node);
 
-            let mut edge = Edge::new(from_id, to_id, style);
-            if let Some(lbl) = label {
-                edge = edge.with_label(lbl);
+                let mut edge = Edge::new(from_id, to_id, style);
+                if let Some(lbl) = label {
+                    edge = edge.with_label(lbl);
+                }
+                flowchart.add_edge(edge);
             }
-            flowchart.add_edge(edge);
+            return Ok(());
         }
-        return Ok(());
+        Err(e) => return Err(e),
+        Ok(_) => {}
     }
 
     // Try to parse as node definition
@@ -137,40 +223,46 @@ fn add_or_update_node(flowchart: &mut Flowchart, node: Node) {
     }
 }
 
+/// Edge pattern with its string representation
+const EDGE_PATTERNS: [(&str, EdgeStyle); 4] = [
+    ("==>", EdgeStyle::ThickArrow),
+    ("-.->", EdgeStyle::DottedArrow),
+    ("-->", EdgeStyle::SolidArrow),
+    ("---", EdgeStyle::Open),
+];
+
 /// Parse chain edges like A --> B --> C --> D
 /// Returns a list of (from_node, to_node, style, label) tuples
-fn try_parse_chain_edge(line: &str) -> Vec<(Node, Node, EdgeStyle, Option<String>)> {
-    let edge_patterns = [
-        ("==>", EdgeStyle::ThickArrow),
-        ("-.->", EdgeStyle::DottedArrow),
-        ("-->", EdgeStyle::SolidArrow),
-        ("---", EdgeStyle::Open),
-    ];
-
+#[allow(clippy::type_complexity)]
+fn try_parse_chain_edge(
+    line: &str,
+    line_num: usize,
+    original_line: &str,
+) -> Result<Vec<(Node, Node, EdgeStyle, Option<String>)>, ParseError> {
     // Find all edge positions with their styles
-    let mut edge_positions: Vec<(usize, usize, EdgeStyle)> = Vec::new();
+    let mut edge_positions: Vec<(usize, usize, EdgeStyle, &str)> = Vec::new();
 
-    for (pattern, style) in edge_patterns {
+    for (pattern, style) in EDGE_PATTERNS {
         let mut search_start = 0;
         while let Some(pos) = line[search_start..].find(pattern) {
             let actual_pos = search_start + pos;
-            edge_positions.push((actual_pos, pattern.len(), style));
+            edge_positions.push((actual_pos, pattern.len(), style, pattern));
             search_start = actual_pos + pattern.len();
         }
     }
 
     if edge_positions.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     // Sort by position
-    edge_positions.sort_by_key(|(pos, _, _)| *pos);
+    edge_positions.sort_by_key(|(pos, _, _, _)| *pos);
 
     // Split line by edge patterns and collect nodes
     let mut result = Vec::new();
     let mut last_end = 0;
 
-    for (i, (pos, pattern_len, style)) in edge_positions.iter().enumerate() {
+    for (i, (pos, pattern_len, style, pattern)) in edge_positions.iter().enumerate() {
         let left = &line[last_end..*pos];
         let right_start = pos + pattern_len;
 
@@ -185,7 +277,20 @@ fn try_parse_chain_edge(line: &str) -> Vec<(Node, Node, EdgeStyle, Option<String
         // Parse left side (node with optional label/shape)
         let from_node = match parse_node_from_edge_part(left.trim()) {
             Some(n) => n,
-            None => continue,
+            None => {
+                // Check if this is the first edge and left side is empty
+                if i == 0 && left.trim().is_empty() {
+                    return Err(ParseError::new(
+                        "Missing node identifier before arrow",
+                        line_num,
+                        pos + 1,
+                    )
+                    .with_source(original_line)
+                    .with_span(pattern.len())
+                    .with_help("Add a node identifier before the arrow, e.g., 'A --> B'"));
+                }
+                continue;
+            }
         };
 
         // Check for label after arrow: -->|label| or --|label|-->
@@ -194,14 +299,25 @@ fn try_parse_chain_edge(line: &str) -> Vec<(Node, Node, EdgeStyle, Option<String
         // Parse right side
         let to_node = match parse_node_from_edge_part(to_part.trim()) {
             Some(n) => n,
-            None => continue,
+            None => {
+                // Missing node after arrow - this is an error
+                let arrow_end = pos + pattern_len;
+                return Err(ParseError::new(
+                    "Missing node identifier after arrow",
+                    line_num,
+                    arrow_end + 1,
+                )
+                .with_source(original_line)
+                .with_span(5) // Point to where the node should be
+                .with_help("Add a node identifier after the arrow, e.g., 'A --> B'"));
+            }
         };
 
         result.push((from_node, to_node, *style, label));
         last_end = right_start;
     }
 
-    result
+    Ok(result)
 }
 
 fn parse_node_from_edge_part(s: &str) -> Option<Node> {
@@ -459,5 +575,46 @@ flowchart TD
         let fc = parse(input).unwrap();
         assert_eq!(fc.nodes.len(), 4, "Should have 4 nodes");
         assert_eq!(fc.edges.len(), 3, "Should have 3 edges");
+    }
+
+    #[test]
+    fn test_parse_error_missing_node_after_arrow() {
+        let input = "flowchart TD\n    A -->";
+        let result = parse(input);
+        assert!(result.is_err(), "Should fail on missing node after arrow");
+        let err = result.unwrap_err();
+        assert!(
+            err.message.contains("Missing node identifier after arrow"),
+            "Error message should mention missing node"
+        );
+        assert_eq!(err.line, 2);
+    }
+
+    #[test]
+    fn test_parse_error_visual_format() {
+        let input = "flowchart TD\n    A -->";
+        let result = parse(input);
+        let err = result.unwrap_err();
+        let formatted = err.format_visual("test.mmd");
+
+        // Check that visual format contains expected parts
+        assert!(formatted.contains("error:"), "Should have error header");
+        assert!(formatted.contains("test.mmd:2:"), "Should have location");
+        assert!(formatted.contains("A -->"), "Should show source line");
+        assert!(formatted.contains("^"), "Should have pointer");
+        assert!(formatted.contains("help:"), "Should have help message");
+    }
+
+    #[test]
+    fn test_parse_error_no_declaration() {
+        let input = "A --> B";
+        let result = parse(input);
+        assert!(result.is_err(), "Should fail without flowchart declaration");
+        let err = result.unwrap_err();
+        assert!(
+            err.message
+                .contains("No flowchart or graph declaration found"),
+            "Error message should mention missing declaration"
+        );
     }
 }
