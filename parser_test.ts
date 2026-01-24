@@ -2,8 +2,8 @@
  * Tests for Mermaid parser
  */
 
-import { assertEquals } from "@std/assert";
-import { parse } from "./parser.ts";
+import { assertEquals, assertThrows } from "@std/assert";
+import { parse, ParseErrors, ParseError } from "./parser.ts";
 
 Deno.test("parse - Simple flowchart with direction", () => {
   const input = `flowchart TD
@@ -286,4 +286,75 @@ Deno.test("parse - Chain with node shapes", () => {
   assertEquals(result.nodes.get("C")?.shape, "circle");
   assertEquals(result.nodes.get("C")?.label, "End");
   assertEquals(result.edges.length, 2);
+});
+
+// Error handling tests
+
+Deno.test("parse - Missing node after arrow throws ParseErrors", () => {
+  const input = `flowchart TD
+    A -->`;
+
+  const error = assertThrows(() => parse(input), ParseErrors);
+  assertEquals(error.errors.length, 1);
+  assertEquals(error.errors[0].message, "Missing node identifier after arrow");
+  assertEquals(error.errors[0].line, 2);
+});
+
+Deno.test("parse - Invalid node identifier start throws ParseErrors", () => {
+  const input = `flowchart TD
+    A --> 123invalid`;
+
+  const error = assertThrows(() => parse(input), ParseErrors);
+  assertEquals(error.errors.length, 1);
+  assertEquals(error.errors[0].message, "Invalid node identifier start");
+  assertEquals(error.errors[0].line, 2);
+});
+
+Deno.test("parse - Unclosed bracket throws ParseErrors", () => {
+  const input = `flowchart TD
+    A[unclosed --> B`;
+
+  const error = assertThrows(() => parse(input), ParseErrors);
+  assertEquals(error.errors.length, 1);
+  assertEquals(error.errors[0].message, "Unclosed bracket in node definition");
+});
+
+Deno.test("parse - Multiple errors are collected", () => {
+  const input = `flowchart TD
+    A -->
+    B --> 123invalid`;
+
+  const error = assertThrows(() => parse(input), ParseErrors);
+  assertEquals(error.errors.length, 2);
+});
+
+Deno.test("parse - ParseError.format produces visual error", () => {
+  const err = new ParseError(
+    "Missing node identifier after arrow",
+    3,
+    10,
+    "    A -->",
+    "Add a target node like 'A --> B'",
+  );
+
+  const formatted = err.format("test.mmd");
+
+  // Check that it contains the expected parts
+  assertEquals(formatted.includes("Error: Missing node identifier after arrow"), true);
+  assertEquals(formatted.includes("--> test.mmd:3:10"), true);
+  assertEquals(formatted.includes("    A -->"), true);
+  assertEquals(formatted.includes("^^^^^"), true);
+  assertEquals(formatted.includes("= help:"), true);
+});
+
+Deno.test("parse - failFast option stops on first error", () => {
+  const input = `flowchart TD
+    A -->
+    B --> 123invalid`;
+
+  const error = assertThrows(
+    () => parse(input, { failFast: true }),
+    ParseErrors,
+  );
+  assertEquals(error.errors.length, 1);
 });

@@ -4,7 +4,7 @@
 
 import { parseArgs } from "@std/cli/parse-args";
 import type { AmbiguousWidthMode, Charset, Direction } from "./types.ts";
-import { parse } from "./parser.ts";
+import { parse, ParseErrors } from "./parser.ts";
 import { render } from "./renderer.ts";
 
 const VERSION = "0.1.0";
@@ -192,12 +192,13 @@ export async function main(): Promise<void> {
     direction = dirStr.toUpperCase() as Direction;
   }
 
-  // Get input
+  // Get input and determine filename for error messages
   const input = await getInput(args);
+  const filename = args.file as string | undefined;
 
   // Parse and render
   try {
-    const flowchart = parse(input);
+    const flowchart = parse(input, { filename });
 
     // Override direction if specified
     if (direction) {
@@ -207,7 +208,11 @@ export async function main(): Promise<void> {
     const output = render(flowchart, charset, ambiguousWidth);
     console.log(output);
   } catch (error) {
-    if (error instanceof Error) {
+    if (error instanceof ParseErrors) {
+      // Display formatted parse errors
+      console.error(error.format(filename));
+      Deno.exit(1);
+    } else if (error instanceof Error) {
       console.error(`Error: ${error.message}`);
     } else {
       console.error("Error: Unknown error occurred");

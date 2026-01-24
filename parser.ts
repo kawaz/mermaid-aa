@@ -17,9 +17,52 @@ export class ParseError extends Error {
     message: string,
     public line: number,
     public column: number,
+    public sourceText?: string,
+    public help?: string,
   ) {
-    super(`Parse error at line ${line}, column ${column}: ${message}`);
+    super(message);
     this.name = "ParseError";
+  }
+
+  /** Format error with visual indicator */
+  format(filename?: string): string {
+    const lines: string[] = [];
+    const location = filename
+      ? ` --> ${filename}:${this.line}:${this.column}`
+      : ` --> input:${this.line}:${this.column}`;
+
+    lines.push(`Error: ${this.message}`);
+    lines.push(location);
+    lines.push("  |");
+
+    if (this.sourceText !== undefined) {
+      const lineNumStr = String(this.line);
+      const linePrefix = `${lineNumStr} | `;
+      lines.push(`${linePrefix}${this.sourceText}`);
+
+      // Create pointer line
+      const padding = " ".repeat(linePrefix.length + this.column - 1);
+      lines.push(`${padding}^^^^^`);
+    }
+
+    if (this.help) {
+      lines.push(`  = help: ${this.help}`);
+    }
+
+    return lines.join("\n");
+  }
+}
+
+/** Collection of parse errors */
+export class ParseErrors extends Error {
+  constructor(public errors: ParseError[]) {
+    super(`Parse failed with ${errors.length} error(s)`);
+    this.name = "ParseErrors";
+  }
+
+  /** Format all errors with visual indicators */
+  format(filename?: string): string {
+    return this.errors.map((e) => e.format(filename)).join("\n\n");
   }
 }
 
@@ -41,68 +84,116 @@ function parseDirection(dir: string): Direction {
   }
 }
 
+/** Context for parsing with position tracking */
+interface ParseContext {
+  errors: ParseError[];
+  currentLine: number;
+  currentLineText: string;
+  lines: string[];
+}
+
 /** Parse node shape from the node text */
 function parseNode(
   nodeText: string,
-): { id: string; label: string; shape: NodeShape } {
+  ctx?: ParseContext,
+  columnOffset?: number,
+): { id: string; label: string; shape: NodeShape } | null {
   // Strip whitespace
-  nodeText = nodeText.trim();
+  const trimmed = nodeText.trim();
+  const leadingSpaces = nodeText.length - nodeText.trimStart().length;
 
   // Circle: A((text))
-  let match = nodeText.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\(\((.+?)\)\)$/);
+  let match = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\(\((.+?)\)\)$/);
   if (match) {
     return { id: match[1], label: match[2], shape: "circle" };
   }
 
   // Hexagon: A{{text}}
-  match = nodeText.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\{\{(.+?)\}\}$/);
+  match = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\{\{(.+?)\}\}$/);
   if (match) {
     return { id: match[1], label: match[2], shape: "hexagon" };
   }
 
   // Stadium: A([text])
-  match = nodeText.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\(\[(.+?)\]\)$/);
+  match = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\(\[(.+?)\]\)$/);
   if (match) {
     return { id: match[1], label: match[2], shape: "stadium" };
   }
 
   // Trapezoid: A[/text\]
-  match = nodeText.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\[\/(.+?)\\\]$/);
+  match = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\[\/(.+?)\\\]$/);
   if (match) {
     return { id: match[1], label: match[2], shape: "trapezoid" };
   }
 
   // Parallelogram: A[/text/]
-  match = nodeText.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\[\/(.+?)\/\]$/);
+  match = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\[\/(.+?)\/\]$/);
   if (match) {
     return { id: match[1], label: match[2], shape: "parallelogram" };
   }
 
   // Diamond: A{text}
-  match = nodeText.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\{(.+?)\}$/);
+  match = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\{(.+?)\}$/);
   if (match) {
     return { id: match[1], label: match[2], shape: "diamond" };
   }
 
   // Rounded: A(text)
-  match = nodeText.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\((.+?)\)$/);
+  match = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\((.+?)\)$/);
   if (match) {
     return { id: match[1], label: match[2], shape: "rounded" };
   }
 
   // Rectangle: A[text]
-  match = nodeText.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\[(.+?)\]$/);
+  match = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\[(.+?)\]$/);
   if (match) {
     return { id: match[1], label: match[2], shape: "rectangle" };
   }
 
   // Just an ID (no shape specified)
-  match = nodeText.match(/^([a-zA-Z_][a-zA-Z0-9_]*)$/);
+  match = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*)$/);
   if (match) {
     return { id: match[1], label: match[1], shape: "rectangle" };
   }
 
-  throw new Error(`Invalid node syntax: ${nodeText}`);
+  // Error handling with context
+  if (ctx) {
+    const column = (columnOffset ?? 0) + leadingSpaces + 1;
+    let message: string;
+    let help: string;
+
+    if (trimmed === "") {
+      message = "Missing node identifier";
+      help = "Add a node identifier like 'A' or 'A[label]'";
+    } else if (!/^[a-zA-Z_]/.test(trimmed)) {
+      message = "Invalid node identifier start";
+      help = "Node identifiers must start with a letter or underscore";
+    } else if (trimmed.includes("[") && !trimmed.includes("]")) {
+      message = "Unclosed bracket in node definition";
+      help = "Close the bracket: A[text] or A[/text/]";
+    } else if (trimmed.includes("(") && !trimmed.includes(")")) {
+      message = "Unclosed parenthesis in node definition";
+      help = "Close the parenthesis: A(text) or A((text))";
+    } else if (trimmed.includes("{") && !trimmed.includes("}")) {
+      message = "Unclosed brace in node definition";
+      help = "Close the brace: A{text} or A{{text}}";
+    } else {
+      message = `Invalid node syntax: '${trimmed}'`;
+      help = "Valid shapes: A[text], A(text), A{text}, A((text)), A{{text}}, A([text])";
+    }
+
+    ctx.errors.push(
+      new ParseError(
+        message,
+        ctx.currentLine,
+        column,
+        ctx.currentLineText,
+        help,
+      ),
+    );
+  }
+
+  return null;
 }
 
 /** Parse edge style from arrow text (arrow + optional label after arrow) */
@@ -205,6 +296,8 @@ function extractFirstNode(text: string): { nodeText: string; remaining: string }
 function parseStatement(
   statement: string,
   nodes: Map<string, Node>,
+  ctx: ParseContext,
+  statementOffset: number,
 ): Edge[] {
   statement = statement.trim();
   if (!statement) return [];
@@ -216,13 +309,9 @@ function parseStatement(
 
   if (!arrowInfo) {
     // No edge, just a node definition
-    try {
-      const node = parseNode(statement);
-      if (!nodes.has(node.id)) {
-        nodes.set(node.id, node);
-      }
-    } catch {
-      // Ignore invalid node syntax
+    const node = parseNode(statement, ctx, statementOffset);
+    if (node && !nodes.has(node.id)) {
+      nodes.set(node.id, node);
     }
     return [];
   }
@@ -231,8 +320,15 @@ function parseStatement(
   const leftPart = statement.substring(0, arrowInfo.index).trim();
   let rightPart = statement.substring(arrowInfo.index + arrowInfo.match.length).trim();
 
+  // Calculate column offset for the left node
+  const leftOffset = statementOffset;
+
   // Parse the left node
-  const fromNode = parseNode(leftPart);
+  const fromNode = parseNode(leftPart, ctx, leftOffset);
+  if (!fromNode) {
+    // Error already recorded, skip this edge
+    return [];
+  }
   if (!nodes.has(fromNode.id)) {
     nodes.set(fromNode.id, fromNode);
   }
@@ -245,10 +341,34 @@ function parseStatement(
     rightPart = consumedAfter;
   }
 
+  // Check for missing node after arrow
+  const rightPartTrimmed = rightPart.trim();
+  if (!rightPartTrimmed) {
+    const arrowEnd = statementOffset + arrowInfo.index + arrowInfo.match.length;
+    ctx.errors.push(
+      new ParseError(
+        "Missing node identifier after arrow",
+        ctx.currentLine,
+        arrowEnd + 1,
+        ctx.currentLineText,
+        "Add a target node like 'A --> B'",
+      ),
+    );
+    return [];
+  }
+
   // Extract the first node from the right part (may be chained)
   const { nodeText: toNodeText, remaining } = extractFirstNode(rightPart);
 
-  const toNode = parseNode(toNodeText);
+  // Calculate column offset for the right node
+  const rightOffset = statementOffset + arrowInfo.index + arrowInfo.match.length +
+    (rightPart.length - rightPart.trimStart().length);
+
+  const toNode = parseNode(toNodeText, ctx, rightOffset);
+  if (!toNode) {
+    // Error already recorded
+    return [];
+  }
   if (!nodes.has(toNode.id)) {
     nodes.set(toNode.id, toNode);
   }
@@ -263,24 +383,46 @@ function parseStatement(
 
   // If there's remaining content, it's a chain - recursively parse it
   if (remaining) {
-    const chainEdges = parseStatement(`${toNode.id} ${remaining}`, nodes);
+    // Calculate new offset for the remaining part
+    const remainingOffset = statementOffset + statement.indexOf(remaining);
+    const chainEdges = parseStatement(`${toNode.id} ${remaining}`, nodes, ctx, remainingOffset);
     edges.push(...chainEdges);
   }
 
   return edges;
 }
 
+/** Parse options */
+export interface ParseOptions {
+  /** Whether to throw on first error (default: false, collect all errors) */
+  failFast?: boolean;
+  /** Filename for error messages */
+  filename?: string;
+}
+
 /** Parse a Mermaid flowchart */
-export function parse(input: string): Flowchart {
+export function parse(input: string, options?: ParseOptions): Flowchart {
   const lines = input.split("\n");
   let direction: Direction = "TB";
   const nodes = new Map<string, Node>();
   const edges: Edge[] = [];
 
+  const ctx: ParseContext = {
+    errors: [],
+    currentLine: 0,
+    currentLineText: "",
+    lines,
+  };
+
   let inFlowchart = false;
 
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex];
     const trimmed = line.trim();
+
+    // Update context for current line
+    ctx.currentLine = lineIndex + 1;
+    ctx.currentLineText = line;
 
     // Skip empty lines and comments
     if (!trimmed || trimmed.startsWith("%%")) {
@@ -293,6 +435,7 @@ export function parse(input: string): Flowchart {
     );
 
     let remainingContent = trimmed;
+    let contentOffset = line.indexOf(trimmed);
 
     if (flowchartMatch) {
       inFlowchart = true;
@@ -301,6 +444,7 @@ export function parse(input: string): Flowchart {
       }
       // Remove the flowchart/graph declaration from the line
       remainingContent = trimmed.substring(flowchartMatch[0].length).trim();
+      contentOffset = line.indexOf(remainingContent, contentOffset + flowchartMatch[0].length);
       // If nothing remains on this line, continue to next line
       if (!remainingContent) {
         continue;
@@ -314,10 +458,22 @@ export function parse(input: string): Flowchart {
     // Split by semicolon for multiple statements on one line
     const statements = remainingContent.split(";");
 
+    let stmtOffset = contentOffset;
     for (const stmt of statements) {
-      const stmtEdges = parseStatement(stmt, nodes);
+      const stmtEdges = parseStatement(stmt, nodes, ctx, stmtOffset);
       edges.push(...stmtEdges);
+      stmtOffset += stmt.length + 1; // +1 for semicolon
+
+      // Fail fast if requested
+      if (options?.failFast && ctx.errors.length > 0) {
+        throw new ParseErrors(ctx.errors);
+      }
     }
+  }
+
+  // Throw if there are any errors
+  if (ctx.errors.length > 0) {
+    throw new ParseErrors(ctx.errors);
   }
 
   return {
