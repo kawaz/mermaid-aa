@@ -9,7 +9,13 @@ tests/
 ├── inputs/           # Input Mermaid files (.mmd)
 ├── expected/         # Expected output by charset
 │   ├── ascii/
+│   │   ├── ambiguous-1/    # With -a 1
+│   │   ├── ambiguous-2/    # With -a 2
+│   │   └── ambiguous-legacy/
 │   ├── unicode/
+│   │   ├── ambiguous-1/
+│   │   ├── ambiguous-2/
+│   │   └── ambiguous-legacy/
 │   ├── unicode-round/
 │   ├── unicode-bold/
 │   └── unicode-double/
@@ -59,6 +65,28 @@ tests/
 - `29_deep_hierarchy.mmd` - Deep node chain
 - `30_wide_graph.mmd` - Wide branching
 
+### Ambiguous Width (31-33)
+- `31_ambiguous_box_drawing.mmd` - Box drawing characters
+- `32_ambiguous_arrows.mmd` - Arrow symbols
+- `33_ambiguous_symbols.mmd` - Various symbols
+
+### Long Labels (34-35)
+- `34_long_label.mmd` - Very long ASCII labels
+- `35_long_cjk_label.mmd` - Long CJK labels
+
+### Edge Cases (36-38)
+- `36_single_node.mmd` - Single node, no edges
+- `37_disconnected.mmd` - Multiple disconnected nodes
+- `38_self_loop.mmd` - Self-referencing edges
+
+### Special Characters (39-40)
+- `39_special_chars.mmd` - Quotes, brackets, symbols
+- `40_unicode_mixed.mmd` - Mixed Unicode characters
+
+### Error Handling (41-42)
+- `41_empty.mmd` - Empty file
+- `42_invalid_syntax.mmd` - Invalid Mermaid syntax
+
 ## Usage
 
 ### Run All Tests
@@ -83,6 +111,15 @@ tests/
 ./tests/run_tests.sh -c ascii
 ```
 
+### Test Ambiguous Width
+
+```bash
+./tests/run_tests.sh -a 1              # Test with ambiguous width = 1
+./tests/run_tests.sh -a 2              # Test with ambiguous width = 2
+./tests/run_tests.sh -a legacy         # Test with legacy mode
+./tests/run_tests.sh -A                # Test all ambiguous width options
+```
+
 ### Generate Expected Output
 
 ```bash
@@ -91,6 +128,12 @@ tests/
 
 # Generate from specific implementation
 ./tests/run_tests.sh -g -r rust
+
+# Generate with specific ambiguous width
+./tests/run_tests.sh -g -a 2
+
+# Generate for all ambiguous width options
+./tests/run_tests.sh -g -A
 ```
 
 ### Verbose Output

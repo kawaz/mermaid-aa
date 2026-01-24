@@ -20,6 +20,9 @@ IMPLEMENTATIONS="${IMPLEMENTATIONS:-go rust typescript moonbit}"
 # Charsets to test
 CHARSETS="${CHARSETS:-ascii unicode}"
 
+# Ambiguous width options (-a option for CJK character width)
+AMBIGUOUS_WIDTHS="${AMBIGUOUS_WIDTHS:-}"
+
 usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -29,6 +32,8 @@ Run mermaid-aa tests across implementations.
 OPTIONS:
     -i, --impl IMPL       Test specific implementation (go|rust|typescript|moonbit)
     -c, --charset SET     Test specific charset (ascii|unicode|unicode-round|unicode-bold|unicode-double)
+    -a, --ambiguous W     Test specific ambiguous width (1|2|legacy)
+    -A, --all-ambiguous   Test all ambiguous width options (1, 2, legacy)
     -g, --generate        Generate expected output from reference implementation
     -r, --reference IMPL  Reference implementation for generating expected output (default: go)
     -u, --update          Update expected output with actual output
@@ -39,7 +44,10 @@ EXAMPLES:
     $(basename "$0")                           # Run all tests
     $(basename "$0") -i go                     # Test only Go implementation
     $(basename "$0") -c unicode                # Test only unicode charset
+    $(basename "$0") -a 2                      # Test with ambiguous width = 2
+    $(basename "$0") -A                        # Test all ambiguous width options
     $(basename "$0") -g -r rust                # Generate expected from Rust impl
+    $(basename "$0") -g -a 2                   # Generate expected with -a 2
     $(basename "$0") -v                        # Verbose output
 
 ENVIRONMENT:
@@ -92,11 +100,19 @@ run_mermaid_aa() {
     local impl="$1"
     local input_file="$2"
     local charset="$3"
+    local ambiguous="${4:-}"
     local bin
     bin=$(get_binary "$impl")
 
+    # Build command with optional -a flag
+    local cmd="$bin -c $charset"
+    if [[ -n "$ambiguous" ]]; then
+        cmd="$cmd -a $ambiguous"
+    fi
+    cmd="$cmd -f $input_file"
+
     # Run and capture output
-    $bin -c "$charset" -f "$input_file" 2>/dev/null || true
+    $cmd 2>/dev/null || true
 }
 
 # Compare outputs
@@ -123,21 +139,30 @@ run_tests() {
     local impl="$1"
     local charset="$2"
     local verbose="${3:-false}"
+    local ambiguous="${4:-}"
 
     local pass=0
     local fail=0
     local skip=0
 
-    mkdir -p "${OUTPUT_DIR}/${impl}/${charset}"
+    # Build output directory path
+    local output_subdir="${charset}"
+    local expected_subdir="${charset}"
+    if [[ -n "$ambiguous" ]]; then
+        output_subdir="${charset}/ambiguous-${ambiguous}"
+        expected_subdir="${charset}/ambiguous-${ambiguous}"
+    fi
+
+    mkdir -p "${OUTPUT_DIR}/${impl}/${output_subdir}"
 
     for input_file in "${INPUTS_DIR}"/*.mmd; do
         local basename
         basename=$(basename "$input_file" .mmd)
-        local expected_file="${EXPECTED_DIR}/${charset}/${basename}.txt"
-        local output_file="${OUTPUT_DIR}/${impl}/${charset}/${basename}.txt"
+        local expected_file="${EXPECTED_DIR}/${expected_subdir}/${basename}.txt"
+        local output_file="${OUTPUT_DIR}/${impl}/${output_subdir}/${basename}.txt"
 
         # Run implementation
-        run_mermaid_aa "$impl" "$input_file" "$charset" > "$output_file"
+        run_mermaid_aa "$impl" "$input_file" "$charset" "$ambiguous" > "$output_file"
 
         # Compare with expected
         local result
@@ -167,22 +192,33 @@ run_tests() {
 generate_expected() {
     local ref_impl="$1"
     local charset="$2"
+    local ambiguous="${3:-}"
 
     if ! check_impl "$ref_impl"; then
         echo -e "${RED}Error: Reference implementation '$ref_impl' not available${NC}" >&2
         return 1
     fi
 
-    mkdir -p "${EXPECTED_DIR}/${charset}"
+    # Build output directory path
+    local output_subdir="${charset}"
+    if [[ -n "$ambiguous" ]]; then
+        output_subdir="${charset}/ambiguous-${ambiguous}"
+    fi
 
-    echo "Generating expected output using $ref_impl for charset $charset..."
+    mkdir -p "${EXPECTED_DIR}/${output_subdir}"
+
+    local msg="Generating expected output using $ref_impl for charset $charset"
+    if [[ -n "$ambiguous" ]]; then
+        msg="$msg (ambiguous=$ambiguous)"
+    fi
+    echo "$msg..."
 
     for input_file in "${INPUTS_DIR}"/*.mmd; do
         local basename
         basename=$(basename "$input_file" .mmd)
-        local output_file="${EXPECTED_DIR}/${charset}/${basename}.txt"
+        local output_file="${EXPECTED_DIR}/${output_subdir}/${basename}.txt"
 
-        run_mermaid_aa "$ref_impl" "$input_file" "$charset" > "$output_file"
+        run_mermaid_aa "$ref_impl" "$input_file" "$charset" "$ambiguous" > "$output_file"
         echo "  Generated: $basename.txt"
     done
 
@@ -193,6 +229,8 @@ generate_expected() {
 main() {
     local specific_impl=""
     local specific_charset=""
+    local specific_ambiguous=""
+    local all_ambiguous=false
     local generate=false
     local reference_impl="go"
     local update=false
@@ -207,6 +245,14 @@ main() {
             -c|--charset)
                 specific_charset="$2"
                 shift 2
+                ;;
+            -a|--ambiguous)
+                specific_ambiguous="$2"
+                shift 2
+                ;;
+            -A|--all-ambiguous)
+                all_ambiguous=true
+                shift
                 ;;
             -g|--generate)
                 generate=true
@@ -252,10 +298,24 @@ main() {
         charsets="$CHARSETS"
     fi
 
+    # Determine ambiguous widths to test
+    local ambiguous_widths=""
+    if [[ "$all_ambiguous" == "true" ]]; then
+        ambiguous_widths="1 2 legacy"
+    elif [[ -n "$specific_ambiguous" ]]; then
+        ambiguous_widths="$specific_ambiguous"
+    fi
+
     # Generate mode
     if [[ "$generate" == "true" ]]; then
         for charset in $charsets; do
-            generate_expected "$reference_impl" "$charset"
+            if [[ -n "$ambiguous_widths" ]]; then
+                for aw in $ambiguous_widths; do
+                    generate_expected "$reference_impl" "$charset" "$aw"
+                done
+            else
+                generate_expected "$reference_impl" "$charset"
+            fi
         done
         exit 0
     fi
@@ -273,11 +333,22 @@ main() {
         echo -e "${GREEN}Testing: $impl${NC}"
 
         for charset in $charsets; do
-            echo "  Charset: $charset"
-            if run_tests "$impl" "$charset" "$verbose"; then
-                ((total_pass++))
+            if [[ -n "$ambiguous_widths" ]]; then
+                for aw in $ambiguous_widths; do
+                    echo "  Charset: $charset (ambiguous=$aw)"
+                    if run_tests "$impl" "$charset" "$verbose" "$aw"; then
+                        ((total_pass++))
+                    else
+                        ((total_fail++))
+                    fi
+                done
             else
-                ((total_fail++))
+                echo "  Charset: $charset"
+                if run_tests "$impl" "$charset" "$verbose"; then
+                    ((total_pass++))
+                else
+                    ((total_fail++))
+                fi
             fi
         done
     done
