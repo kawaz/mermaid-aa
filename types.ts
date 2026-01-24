@@ -61,10 +61,13 @@ export interface RenderedNode extends Node {
   height: number;
 }
 
+// Re-export from width.ts for convenience
+export type { AmbiguousWidthConfig, AmbiguousWidthMode } from "./width.ts";
+
 /** CLI options */
 export interface Options {
   file?: string;
   charset: Charset;
-  ambiguousWidth: 1 | 2;
+  ambiguousWidth: import("./width.ts").AmbiguousWidthMode;
   direction?: Direction;
 }

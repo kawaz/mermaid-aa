@@ -2,7 +2,7 @@
  * Layout calculation for flowchart nodes
  */
 
-import type { Flowchart, RenderedNode } from "./types.ts";
+import type { AmbiguousWidthMode, Flowchart, RenderedNode } from "./types.ts";
 import { stringWidth } from "./width.ts";
 
 /** Minimum dimensions */
@@ -15,7 +15,7 @@ const NODE_SPACING_Y = 2;
 /** Calculate layout for all nodes */
 export function calculateLayout(
   flowchart: Flowchart,
-  ambiguousWidth: 1 | 2 = 1,
+  ambiguousWidth: AmbiguousWidthMode = 1,
 ): {
   nodes: Map<string, RenderedNode>;
   width: number;

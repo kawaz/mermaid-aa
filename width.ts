@@ -2,6 +2,54 @@
  * Character width calculation with East Asian Width support
  */
 
+/**
+ * Ambiguous width mode configuration
+ * - ambiguousWidth: Width for general ambiguous characters
+ * - boxDrawingWidth: Width for Box Drawing characters (U+2500-U+257F)
+ */
+export interface AmbiguousWidthConfig {
+  ambiguousWidth: 1 | 2;
+  boxDrawingWidth: 1 | 2;
+}
+
+/**
+ * Ambiguous width mode values:
+ * - 1 or "half": All ambiguous = 1 (Western terminals)
+ * - 2 or "full": Ambiguous = 2, Box Drawing = 1 (CJK terminals, recommended)
+ * - "console": Same as "half" (explicit name)
+ * - "legacy": All ambiguous including Box Drawing = 2 (legacy compatibility)
+ */
+export type AmbiguousWidthMode = 1 | 2 | "half" | "full" | "console" | "legacy";
+
+/**
+ * Parse ambiguous width mode to config
+ */
+export function parseAmbiguousWidthMode(
+  mode: AmbiguousWidthMode,
+): AmbiguousWidthConfig {
+  switch (mode) {
+    case 1:
+    case "half":
+    case "console":
+      return { ambiguousWidth: 1, boxDrawingWidth: 1 };
+    case 2:
+    case "full":
+      return { ambiguousWidth: 2, boxDrawingWidth: 1 };
+    case "legacy":
+      return { ambiguousWidth: 2, boxDrawingWidth: 2 };
+  }
+}
+
+// Box Drawing characters range (U+2500-U+257F)
+const BOX_DRAWING_RANGE: [number, number] = [0x2500, 0x257f];
+
+/**
+ * Check if a code point is a Box Drawing character
+ */
+export function isBoxDrawing(codePoint: number): boolean {
+  return codePoint >= BOX_DRAWING_RANGE[0] && codePoint <= BOX_DRAWING_RANGE[1];
+}
+
 // Unicode East Asian Width ranges
 // Full-width characters
 const FULLWIDTH_RANGES: [number, number][] = [
@@ -228,7 +276,10 @@ export function isAmbiguous(codePoint: number): boolean {
 }
 
 /** Get the display width of a character */
-export function charWidth(char: string, ambiguousWidth: 1 | 2 = 1): number {
+export function charWidth(
+  char: string,
+  ambiguousWidthMode: AmbiguousWidthMode = 1,
+): number {
   const codePoint = char.codePointAt(0);
   if (codePoint === undefined) return 0;
 
@@ -247,17 +298,25 @@ export function charWidth(char: string, ambiguousWidth: 1 | 2 = 1): number {
   }
 
   if (isAmbiguous(codePoint)) {
-    return ambiguousWidth;
+    const config = parseAmbiguousWidthMode(ambiguousWidthMode);
+    // Box Drawing characters have separate width setting
+    if (isBoxDrawing(codePoint)) {
+      return config.boxDrawingWidth;
+    }
+    return config.ambiguousWidth;
   }
 
   return 1;
 }
 
 /** Get the display width of a string */
-export function stringWidth(str: string, ambiguousWidth: 1 | 2 = 1): number {
+export function stringWidth(
+  str: string,
+  ambiguousWidthMode: AmbiguousWidthMode = 1,
+): number {
   let width = 0;
   for (const char of str) {
-    width += charWidth(char, ambiguousWidth);
+    width += charWidth(char, ambiguousWidthMode);
   }
   return width;
 }
@@ -267,14 +326,14 @@ export function padString(
   str: string,
   targetWidth: number,
   padChar: string = " ",
-  ambiguousWidth: 1 | 2 = 1,
+  ambiguousWidthMode: AmbiguousWidthMode = 1,
 ): string {
-  const currentWidth = stringWidth(str, ambiguousWidth);
+  const currentWidth = stringWidth(str, ambiguousWidthMode);
   if (currentWidth >= targetWidth) {
     return str;
   }
   const padWidth = targetWidth - currentWidth;
-  const padCharWidth = charWidth(padChar, ambiguousWidth);
+  const padCharWidth = charWidth(padChar, ambiguousWidthMode);
   const padCount = Math.floor(padWidth / padCharWidth);
   return str + padChar.repeat(padCount);
 }
@@ -284,9 +343,9 @@ export function centerString(
   str: string,
   targetWidth: number,
   padChar: string = " ",
-  ambiguousWidth: 1 | 2 = 1,
+  ambiguousWidthMode: AmbiguousWidthMode = 1,
 ): string {
-  const currentWidth = stringWidth(str, ambiguousWidth);
+  const currentWidth = stringWidth(str, ambiguousWidthMode);
   if (currentWidth >= targetWidth) {
     return str;
   }

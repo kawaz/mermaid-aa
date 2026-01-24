@@ -3,7 +3,7 @@
  */
 
 import { parseArgs } from "@std/cli/parse-args";
-import type { Charset, Direction } from "./types.ts";
+import type { AmbiguousWidthMode, Charset, Direction } from "./types.ts";
 import { parse } from "./parser.ts";
 import { render } from "./renderer.ts";
 
@@ -21,8 +21,13 @@ Options:
   -f, --file <FILE>           Read from file
   -c, --charset <CHARSET>     Character set [default: unicode]
                               [ascii|unicode|unicode-round|unicode-bold|unicode-double]
-  -a, --ambiguous-width <N>   Width for ambiguous chars [default: 1]
-                              [1: half-width, 2: full-width]
+  -a, --ambiguous-width <W>   Width for East Asian Ambiguous characters [default: 1]
+
+        Values:
+          1, half     Half-width (1 cell) - for Western terminals
+          2, full     Full-width (2 cells) - for CJK terminals
+          console     Ambiguous=1, Box Drawing=1 (recommended)
+          legacy      All ambiguous including Box Drawing=2
   -d, --direction <DIR>       Override direction [TB|TD|BT|LR|RL]
   -h, --help                  Print help
   -V, --version               Print version
@@ -36,11 +41,11 @@ Examples:
   mermaid-aa 'graph TD; A-->B'
   mermaid-aa -f diagram.mmd
   echo 'graph LR; A-->B' | mermaid-aa
-  mermaid-aa -c ascii -a 2 'graph TD; A[日本語]-->B'
+  mermaid-aa -c ascii -a full 'graph TD; A[日本語]-->B'
 
 Environment Variables:
   MERMAID_AA_CHARSET          Default character set
-  MERMAID_AA_AMBIGUOUS_WIDTH  Default ambiguous width (1 or 2)
+  MERMAID_AA_AMBIGUOUS_WIDTH  Default ambiguous width (1, 2, half, full, console, legacy)
 `;
 
 function isValidCharset(value: string): value is Charset {
@@ -50,6 +55,21 @@ function isValidCharset(value: string): value is Charset {
 
 function isValidDirection(value: string): value is Direction {
   return ["TB", "TD", "BT", "LR", "RL"].includes(value.toUpperCase());
+}
+
+function parseAmbiguousWidth(value: string): AmbiguousWidthMode | null {
+  switch (value.toLowerCase()) {
+    case "1":
+    case "half":
+    case "console":
+      return value === "1" ? 1 : value.toLowerCase() as AmbiguousWidthMode;
+    case "2":
+    case "full":
+    case "legacy":
+      return value === "2" ? 2 : value.toLowerCase() as AmbiguousWidthMode;
+    default:
+      return null;
+  }
 }
 
 async function readStdin(): Promise<string> {
@@ -153,10 +173,10 @@ export async function main(): Promise<void> {
 
   // Validate ambiguous-width
   const ambiguousWidthStr = args["ambiguous-width"] as string;
-  const ambiguousWidth = parseInt(ambiguousWidthStr, 10);
-  if (ambiguousWidth !== 1 && ambiguousWidth !== 2) {
+  const ambiguousWidth = parseAmbiguousWidth(ambiguousWidthStr);
+  if (ambiguousWidth === null) {
     console.error(`Error: Invalid ambiguous-width: ${ambiguousWidthStr}`);
-    console.error("Valid values: 1 (half-width), 2 (full-width)");
+    console.error("Valid values: 1, 2, half, full, console, legacy");
     Deno.exit(3);
   }
 
@@ -184,7 +204,7 @@ export async function main(): Promise<void> {
       flowchart.direction = direction;
     }
 
-    const output = render(flowchart, charset, ambiguousWidth as 1 | 2);
+    const output = render(flowchart, charset, ambiguousWidth);
     console.log(output);
   } catch (error) {
     if (error instanceof Error) {

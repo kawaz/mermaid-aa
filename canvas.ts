@@ -2,16 +2,20 @@
  * Drawing canvas for ASCII art rendering
  */
 
-import { stringWidth } from "./width.ts";
+import { type AmbiguousWidthMode, stringWidth } from "./width.ts";
 
 /** 2D canvas for drawing ASCII art */
 export class Canvas {
   private grid: string[][];
   public readonly width: number;
   public readonly height: number;
-  private ambiguousWidth: 1 | 2;
+  private ambiguousWidth: AmbiguousWidthMode;
 
-  constructor(width: number, height: number, ambiguousWidth: 1 | 2 = 1) {
+  constructor(
+    width: number,
+    height: number,
+    ambiguousWidth: AmbiguousWidthMode = 1,
+  ) {
     this.width = width;
     this.height = height;
     this.ambiguousWidth = ambiguousWidth;

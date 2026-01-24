@@ -3,6 +3,7 @@
  */
 
 import type {
+  AmbiguousWidthMode,
   Charset,
   Direction,
   Edge,
@@ -18,7 +19,7 @@ import { centerString } from "./width.ts";
 export function render(
   flowchart: Flowchart,
   charset: Charset = "unicode",
-  ambiguousWidth: 1 | 2 = 1,
+  ambiguousWidth: AmbiguousWidthMode = 1,
 ): string {
   const chars = getCharset(charset);
   const { nodes, width, height } = calculateLayout(flowchart, ambiguousWidth);
@@ -60,7 +61,7 @@ function drawNode(
   canvas: Canvas,
   node: RenderedNode,
   chars: CharacterSet,
-  ambiguousWidth: 1 | 2,
+  ambiguousWidth: AmbiguousWidthMode,
 ): void {
   const { x, y, width, height, label, shape } = node;
 
@@ -112,7 +113,7 @@ function drawRectangle(
   height: number,
   label: string,
   chars: CharacterSet,
-  ambiguousWidth: 1 | 2,
+  ambiguousWidth: AmbiguousWidthMode,
 ): void {
   canvas.drawBox(
     x,
@@ -142,7 +143,7 @@ function drawRounded(
   height: number,
   label: string,
   chars: CharacterSet,
-  ambiguousWidth: 1 | 2,
+  ambiguousWidth: AmbiguousWidthMode,
 ): void {
   // Top and bottom with curved brackets
   canvas.set(x, y, chars.roundedTopLeft);
@@ -177,7 +178,7 @@ function drawStadium(
   height: number,
   label: string,
   chars: CharacterSet,
-  ambiguousWidth: 1 | 2,
+  ambiguousWidth: AmbiguousWidthMode,
 ): void {
   // Stadium shape: ([text])
   canvas.set(x, y, "(");
@@ -217,7 +218,7 @@ function drawDiamond(
   height: number,
   label: string,
   chars: CharacterSet,
-  ambiguousWidth: 1 | 2,
+  ambiguousWidth: AmbiguousWidthMode,
 ): void {
   // Diamond: <text>
   const midY = y + Math.floor(height / 2);
@@ -249,7 +250,7 @@ function drawHexagon(
   height: number,
   label: string,
   chars: CharacterSet,
-  ambiguousWidth: 1 | 2,
+  ambiguousWidth: AmbiguousWidthMode,
 ): void {
   // Hexagon: {{text}}
   canvas.set(x, y, "{");
@@ -289,7 +290,7 @@ function drawCircle(
   height: number,
   label: string,
   chars: CharacterSet,
-  ambiguousWidth: 1 | 2,
+  ambiguousWidth: AmbiguousWidthMode,
 ): void {
   // Circle: ((text))
   canvas.set(x, y, "(");
@@ -329,7 +330,7 @@ function drawParallelogram(
   height: number,
   label: string,
   chars: CharacterSet,
-  ambiguousWidth: 1 | 2,
+  ambiguousWidth: AmbiguousWidthMode,
 ): void {
   // Parallelogram: /text/
   canvas.set(x, y, chars.slashForward);
@@ -364,7 +365,7 @@ function drawTrapezoid(
   height: number,
   label: string,
   chars: CharacterSet,
-  ambiguousWidth: 1 | 2,
+  ambiguousWidth: AmbiguousWidthMode,
 ): void {
   // Trapezoid: /text\
   canvas.set(x, y, chars.slashForward);
@@ -398,7 +399,7 @@ function drawEdge(
   edge: Edge,
   chars: CharacterSet,
   direction: Direction,
-  _ambiguousWidth: 1 | 2,
+  _ambiguousWidth: AmbiguousWidthMode,
 ): void {
   const isVertical = direction === "TB" || direction === "TD" ||
     direction === "BT";
