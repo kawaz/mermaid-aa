@@ -212,3 +212,78 @@ Deno.test("parse - Default direction is TB", () => {
 
   assertEquals(result.direction, "TB");
 });
+
+Deno.test("parse - Chain edges A --> B --> C --> D", () => {
+  const input = `flowchart TD
+    A --> B --> C --> D`;
+
+  const result = parse(input);
+
+  assertEquals(result.nodes.size, 4);
+  assertEquals(result.edges.length, 3);
+  assertEquals(result.edges[0].from, "A");
+  assertEquals(result.edges[0].to, "B");
+  assertEquals(result.edges[1].from, "B");
+  assertEquals(result.edges[1].to, "C");
+  assertEquals(result.edges[2].from, "C");
+  assertEquals(result.edges[2].to, "D");
+});
+
+Deno.test("parse - Edge with label after arrow -->|yes|", () => {
+  const input = `flowchart TD
+    A -->|yes| B`;
+
+  const result = parse(input);
+
+  assertEquals(result.nodes.size, 2);
+  assertEquals(result.edges.length, 1);
+  assertEquals(result.edges[0].from, "A");
+  assertEquals(result.edges[0].to, "B");
+  assertEquals(result.edges[0].label, "yes");
+});
+
+Deno.test("parse - Edge with Japanese label -->|はい|", () => {
+  const input = `flowchart TD
+    A -->|はい| B[完了]`;
+
+  const result = parse(input);
+
+  assertEquals(result.nodes.size, 2);
+  assertEquals(result.edges.length, 1);
+  assertEquals(result.edges[0].from, "A");
+  assertEquals(result.edges[0].to, "B");
+  assertEquals(result.edges[0].label, "はい");
+  assertEquals(result.nodes.get("B")?.label, "完了");
+});
+
+Deno.test("parse - Chain edges with labels", () => {
+  const input = `flowchart TD
+    A -->|first| B -->|second| C`;
+
+  const result = parse(input);
+
+  assertEquals(result.nodes.size, 3);
+  assertEquals(result.edges.length, 2);
+  assertEquals(result.edges[0].from, "A");
+  assertEquals(result.edges[0].to, "B");
+  assertEquals(result.edges[0].label, "first");
+  assertEquals(result.edges[1].from, "B");
+  assertEquals(result.edges[1].to, "C");
+  assertEquals(result.edges[1].label, "second");
+});
+
+Deno.test("parse - Chain with node shapes", () => {
+  const input = `flowchart TD
+    A[Start] --> B{Decision} --> C((End))`;
+
+  const result = parse(input);
+
+  assertEquals(result.nodes.size, 3);
+  assertEquals(result.nodes.get("A")?.shape, "rectangle");
+  assertEquals(result.nodes.get("A")?.label, "Start");
+  assertEquals(result.nodes.get("B")?.shape, "diamond");
+  assertEquals(result.nodes.get("B")?.label, "Decision");
+  assertEquals(result.nodes.get("C")?.shape, "circle");
+  assertEquals(result.nodes.get("C")?.label, "End");
+  assertEquals(result.edges.length, 2);
+});

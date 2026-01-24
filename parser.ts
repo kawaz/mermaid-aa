@@ -105,9 +105,15 @@ function parseNode(
   throw new Error(`Invalid node syntax: ${nodeText}`);
 }
 
-/** Parse edge style from arrow text */
-function parseEdgeStyle(arrow: string): { style: EdgeStyle; label?: string } {
-  // With label: --|text|-->
+/** Parse edge style from arrow text (arrow + optional label after arrow) */
+function parseEdgeStyle(
+  arrow: string,
+  afterArrow?: string,
+): { style: EdgeStyle; label?: string; consumedAfter?: string } {
+  let label: string | undefined;
+  let consumedAfter: string | undefined;
+
+  // Check for label embedded in arrow: --|text|-->
   let match = arrow.match(/^--\|(.+?)\|-->$/);
   if (match) {
     return { style: "solid", label: match[1] };
@@ -125,55 +131,90 @@ function parseEdgeStyle(arrow: string): { style: EdgeStyle; label?: string } {
     return { style: "thick", label: match[1] };
   }
 
-  // Simple arrows
-  if (arrow === "-->") {
-    return { style: "solid" };
-  }
-  if (arrow === "-.->") {
-    return { style: "dotted" };
-  }
-  if (arrow === "==>") {
-    return { style: "thick" };
-  }
-  if (arrow === "---") {
-    return { style: "open" };
-  }
-
-  // Default to solid
-  return { style: "solid" };
-}
-
-/** Parse a single statement (node definition or edge) */
-function parseStatement(
-  statement: string,
-  nodes: Map<string, Node>,
-): Edge | null {
-  statement = statement.trim();
-  if (!statement) return null;
-
-  // Try to find an edge arrow
-  const arrowPatterns = [
-    /--\|.+?\|-->/,
-    /-\.-\|.+?\|->/,
-    /==\|.+?\|==>/,
-    /-->/,
-    /-\.->|\.->/,
-    /==>/,
-    /---/,
-  ];
-
-  let arrowMatch: RegExpMatchArray | null = null;
-  let arrowPattern: RegExp | null = null;
-
-  for (const pattern of arrowPatterns) {
-    arrowMatch = statement.match(pattern);
-    if (arrowMatch) {
-      arrowPattern = pattern;
-      break;
+  // Check for label after arrow: -->|text|
+  if (afterArrow) {
+    const labelMatch = afterArrow.match(/^\|([^|]+)\|(.*)$/);
+    if (labelMatch) {
+      label = labelMatch[1];
+      consumedAfter = labelMatch[2].trim();
     }
   }
 
-  if (!arrowMatch || !arrowPattern) {
+  // Simple arrows
+  if (arrow === "-->") {
+    return { style: "solid", label, consumedAfter };
+  }
+  if (arrow === "-.->") {
+    return { style: "dotted", label, consumedAfter };
+  }
+  if (arrow === "==>") {
+    return { style: "thick", label, consumedAfter };
+  }
+  if (arrow === "---") {
+    return { style: "open", label, consumedAfter };
+  }
+
+  // Default to solid
+  return { style: "solid", label, consumedAfter };
+}
+
+/** Arrow patterns for edge detection (order matters - more specific first) */
+const ARROW_PATTERNS = [
+  /--\|.+?\|-->/,
+  /-\.-\|.+?\|->/,
+  /==\|.+?\|==>/,
+  /-->/,
+  /-\.->|\.->/,
+  /==>/,
+  /---/,
+];
+
+/** Find the first arrow in the statement */
+function findFirstArrow(statement: string): { match: string; index: number } | null {
+  let earliest: { match: string; index: number; pattern: RegExp } | null = null;
+
+  for (const pattern of ARROW_PATTERNS) {
+    const match = statement.match(pattern);
+    if (match && match.index !== undefined) {
+      if (earliest === null || match.index < earliest.index) {
+        earliest = { match: match[0], index: match.index, pattern };
+      }
+    }
+  }
+
+  return earliest ? { match: earliest.match, index: earliest.index } : null;
+}
+
+/** Extract the first node from a string that may contain chained edges */
+function extractFirstNode(text: string): { nodeText: string; remaining: string } {
+  text = text.trim();
+
+  // Find if there's an arrow in the text
+  const arrowInfo = findFirstArrow(text);
+  if (arrowInfo) {
+    const nodeText = text.substring(0, arrowInfo.index).trim();
+    const remaining = text.substring(arrowInfo.index).trim();
+    return { nodeText, remaining };
+  }
+
+  // No arrow, the entire text is the node
+  return { nodeText: text, remaining: "" };
+}
+
+/** Parse a single statement (node definition or edge), returns multiple edges for chains */
+function parseStatement(
+  statement: string,
+  nodes: Map<string, Node>,
+): Edge[] {
+  statement = statement.trim();
+  if (!statement) return [];
+
+  const edges: Edge[] = [];
+
+  // Try to find an edge arrow
+  const arrowInfo = findFirstArrow(statement);
+
+  if (!arrowInfo) {
     // No edge, just a node definition
     try {
       const node = parseNode(statement);
@@ -183,36 +224,50 @@ function parseStatement(
     } catch {
       // Ignore invalid node syntax
     }
-    return null;
+    return [];
   }
 
-  // Split by arrow
-  const arrowIndex = statement.indexOf(arrowMatch[0]);
-  const leftPart = statement.substring(0, arrowIndex).trim();
-  const rightPart = statement.substring(arrowIndex + arrowMatch[0].length)
-    .trim();
+  // Split by the first arrow
+  const leftPart = statement.substring(0, arrowInfo.index).trim();
+  let rightPart = statement.substring(arrowInfo.index + arrowInfo.match.length).trim();
 
-  // Parse both sides
+  // Parse the left node
   const fromNode = parseNode(leftPart);
-  const toNode = parseNode(rightPart);
-
-  // Register nodes if not already present
   if (!nodes.has(fromNode.id)) {
     nodes.set(fromNode.id, fromNode);
   }
+
+  // Parse edge style, checking for label after arrow (e.g., -->|label|)
+  const { style, label, consumedAfter } = parseEdgeStyle(arrowInfo.match, rightPart);
+
+  // If we consumed part of rightPart for the label, update rightPart
+  if (consumedAfter !== undefined) {
+    rightPart = consumedAfter;
+  }
+
+  // Extract the first node from the right part (may be chained)
+  const { nodeText: toNodeText, remaining } = extractFirstNode(rightPart);
+
+  const toNode = parseNode(toNodeText);
   if (!nodes.has(toNode.id)) {
     nodes.set(toNode.id, toNode);
   }
 
-  // Parse edge style
-  const { style, label } = parseEdgeStyle(arrowMatch[0]);
-
-  return {
+  // Create the edge
+  edges.push({
     from: fromNode.id,
     to: toNode.id,
     style,
     label,
-  };
+  });
+
+  // If there's remaining content, it's a chain - recursively parse it
+  if (remaining) {
+    const chainEdges = parseStatement(`${toNode.id} ${remaining}`, nodes);
+    edges.push(...chainEdges);
+  }
+
+  return edges;
 }
 
 /** Parse a Mermaid flowchart */
@@ -260,10 +315,8 @@ export function parse(input: string): Flowchart {
     const statements = remainingContent.split(";");
 
     for (const stmt of statements) {
-      const edge = parseStatement(stmt, nodes);
-      if (edge) {
-        edges.push(edge);
-      }
+      const stmtEdges = parseStatement(stmt, nodes);
+      edges.push(...stmtEdges);
     }
   }
 
