@@ -144,3 +144,63 @@ test "charset parsing" {
   )
   inspect!(@types.Charset::from_string("invalid"), content="None")
 }
+
+///|
+test "error format - missing keyword" {
+  try {
+    let _ = @parser.parse("invalid input")
+    assert_true!(false, msg="should have raised error")
+  } catch {
+    @parser.ParseError(msg) => {
+      assert_true!(msg.contains("flowchart") || msg.contains("graph"))
+    }
+    @parser.ParseErrorDetailed(info) => {
+      let formatted = info.format()
+      assert_true!(formatted.contains("Error:"))
+      assert_true!(formatted.contains("-->"))
+    }
+    _ => assert_true!(true) // Other errors are acceptable
+  }
+}
+
+///|
+test "error format - missing node after arrow" {
+  try {
+    let _ = @parser.parse_with_filename(
+      "graph TD\n    A -->",
+      "test.mmd",
+    )
+    assert_true!(false, msg="should have raised error")
+  } catch {
+    @parser.ParseError(msg) => {
+      assert_true!(msg.contains("Missing") || msg.contains("error"))
+    }
+    @parser.ParseErrorDetailed(info) => {
+      let formatted = info.format()
+      assert_true!(formatted.contains("Error: Missing node identifier after arrow"))
+      assert_true!(formatted.contains("--> test.mmd:2:"))
+      assert_true!(formatted.contains("= help:"))
+    }
+    _ => assert_true!(true) // Other errors are acceptable
+  }
+}
+
+///|
+test "ParseErrorInfo format" {
+  let err_info = @parser.ParseErrorInfo::new(
+    "Missing node identifier after arrow",
+    3,
+    7,
+    9,
+    "    A -->",
+    "input.mmd",
+    Some("add a node identifier like 'B' after the arrow"),
+  )
+  let formatted = err_info.format()
+  // Verify the format structure
+  assert_true!(formatted.contains("Error: Missing node identifier after arrow"))
+  assert_true!(formatted.contains("--> input.mmd:3:7"))
+  assert_true!(formatted.contains("3 |     A -->"))
+  assert_true!(formatted.contains("^^^"))
+  assert_true!(formatted.contains("= help: add a node identifier"))
+}

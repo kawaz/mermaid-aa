@@ -4,10 +4,6 @@
     {
       "path": "kawaz/mermaid_aa",
       "alias": "lib"
-    },
-    {
-      "path": "kawaz/mermaid_aa/src/parser",
-      "alias": "parser"
     }
   ]
 }

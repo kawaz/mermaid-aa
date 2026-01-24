@@ -33,6 +33,19 @@ pub fn parse(input : String) -> @types.Flowchart raise @parser.ParseError {
   @parser.parse(input)
 }
 
+// Parse with custom filename for error messages
+pub fn parse_with_filename(
+  input : String,
+  filename : String
+) -> @types.Flowchart raise @parser.ParseError {
+  @parser.parse_with_filename(input, filename)
+}
+
+// Format a ParseError for display
+pub fn format_error(err : @parser.ParseError) -> String {
+  @parser.format_error(err)
+}
+
 pub fn render(
   flowchart : @types.Flowchart,
   options : @types.RenderOptions

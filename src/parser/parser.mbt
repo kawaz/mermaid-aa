@@ -11,11 +11,78 @@ priv struct Parser {
   mut pos : Int
   mut line : Int
   mut column : Int
+  filename : String
 }
 
-/// Create a new parser
-fn Parser::new(input : String) -> Parser {
-  { input, pos: 0, line: 1, column: 1 }
+/// Create a new parser with filename
+fn Parser::new_with_filename(input : String, filename : String) -> Parser {
+  { input, pos: 0, line: 1, column: 1, filename }
+}
+
+/// Get the source line at the given line number (1-indexed)
+fn Parser::get_source_line(self : Parser, line_num : Int) -> String {
+  let lines = split_lines(self.input)
+  if line_num >= 1 && line_num <= lines.length() {
+    lines[line_num - 1]
+  } else {
+    ""
+  }
+}
+
+/// Split input into lines
+fn split_lines(input : String) -> Array[String] {
+  let lines : Array[String] = []
+  let buf = StringBuilder::new()
+  for i = 0; i < input.length(); i = i + 1 {
+    let c = char_at(input, i)
+    if c == '\n' {
+      lines.push(buf.to_string())
+      buf.reset()
+    } else if c != '\r' {
+      buf.write_char(c)
+    }
+  }
+  // Don't forget the last line
+  if buf.to_string().length() > 0 {
+    lines.push(buf.to_string())
+  }
+  lines
+}
+
+/// Create a parse error with detailed information
+fn Parser::make_error(
+  self : Parser,
+  message : String,
+  help : String?
+) -> ParseErrorInfo {
+  ParseErrorInfo::new(
+    message,
+    self.line,
+    self.column,
+    self.column,
+    self.get_source_line(self.line),
+    self.filename,
+    help,
+  )
+}
+
+/// Create a parse error with span (multi-character highlight)
+fn Parser::make_error_span(
+  self : Parser,
+  message : String,
+  start_column : Int,
+  end_column : Int,
+  help : String?
+) -> ParseErrorInfo {
+  ParseErrorInfo::new(
+    message,
+    self.line,
+    start_column,
+    end_column,
+    self.get_source_line(self.line),
+    self.filename,
+    help,
+  )
 }
 
 /// Check if at end of input
@@ -336,32 +403,55 @@ fn Parser::skip_comment(self : Parser) -> Unit {
   }
 }
 
+/// Result type for parse_line with detailed error
+priv enum ParseLineResult {
+  Ok
+  Error(ParseErrorInfo)
+}
+
 /// Parse a line (node definition or edge)
-fn Parser::parse_line(self : Parser, flowchart : @types.Flowchart) -> Bool {
+fn Parser::parse_line(self : Parser, flowchart : @types.Flowchart) -> ParseLineResult {
   self.skip_whitespace()
   self.skip_comment()
   if self.is_eof() {
-    return true
+    return Ok
   }
   // Try to parse a node
   match self.parse_node() {
     Some(node) => {
       flowchart.add_node(node)
+      // Track the last source node for chained edges
+      let mut last_node = node
       // Check for edges in a while loop
       while true {
         self.skip_spaces()
+        let edge_start_col = self.column
         match self.parse_edge() {
           Some((style, label)) => {
+            // Record position after edge for error reporting
+            let after_edge_col = self.column
+            self.skip_spaces()
             // Parse target node
             match self.parse_node() {
               Some(target) => {
                 flowchart.add_node(target)
                 flowchart.add_edge(
-                  @types.Edge::new(node.id(), target.id(), style, label),
+                  @types.Edge::new(last_node.id(), target.id(), style, label),
                 )
                 // Allow chaining: A --> B --> C
+                last_node = target
               }
-              None => return false
+              None => {
+                // Missing target node after arrow
+                return Error(
+                  self.make_error_span(
+                    "Missing node identifier after arrow",
+                    edge_start_col,
+                    after_edge_col - 1,
+                    Some("add a node identifier like 'B' or 'B[Label]' after the arrow"),
+                  ),
+                )
+              }
             }
           }
           None => break
@@ -370,43 +460,152 @@ fn Parser::parse_line(self : Parser, flowchart : @types.Flowchart) -> Bool {
       // Skip to next statement (semicolon or newline)
       self.skip_spaces()
       let _ = self.consume(";")
-      true
+      Ok
     }
     None => {
       // Skip semicolons
       if self.consume(";") {
-        return true
+        return Ok
       }
       // Skip newlines
       if self.consume("\n") {
-        return true
+        return Ok
       }
-      // Unknown content - skip to next line
-      while not(self.is_eof()) {
-        match self.current() {
-          Some('\n') | Some(';') => break
-          _ => self.advance()
-        }
+      // Unknown content - report error
+      let char_str = match self.current() {
+        Some(c) => c.to_string()
+        None => "EOF"
       }
-      true
+      return Error(
+        self.make_error(
+          "Unexpected character '\{char_str}'",
+          Some("expected node identifier (e.g., 'A', 'Start') or comment (%%)"),
+        ),
+      )
     }
   }
+}
+
+/// Parse error with detailed location information
+pub(all) struct ParseErrorInfo {
+  message : String
+  line : Int
+  column : Int
+  end_column : Int  // For multi-character highlights
+  source_line : String
+  filename : String
+  help : String?
+}
+
+/// Create a new ParseErrorInfo
+pub fn ParseErrorInfo::new(
+  message : String,
+  line : Int,
+  column : Int,
+  end_column : Int,
+  source_line : String,
+  filename : String,
+  help : String?
+) -> ParseErrorInfo {
+  { message, line, column, end_column, source_line, filename, help }
+}
+
+/// Write n spaces to buffer
+fn write_spaces(buf : StringBuilder, n : Int) -> Unit {
+  for i = 0; i < n; i = i + 1 {
+    buf.write_char(' ')
+  }
+}
+
+/// Write n copies of a character to buffer
+fn write_chars(buf : StringBuilder, c : Char, n : Int) -> Unit {
+  for i = 0; i < n; i = i + 1 {
+    buf.write_char(c)
+  }
+}
+
+/// Format error for display (visual format)
+pub fn ParseErrorInfo::format(self : ParseErrorInfo) -> String {
+  let buf = StringBuilder::new()
+  // Error header: "Error: message"
+  buf.write_string("Error: ")
+  buf.write_string(self.message)
+  buf.write_char('\n')
+  // Location: " --> filename:line:column"
+  buf.write_string(" --> ")
+  buf.write_string(self.filename)
+  buf.write_char(':')
+  buf.write_string(self.line.to_string())
+  buf.write_char(':')
+  buf.write_string(self.column.to_string())
+  buf.write_char('\n')
+  // Separator line
+  let line_num_str = self.line.to_string()
+  let padding = line_num_str.length()
+  write_spaces(buf, padding + 1)
+  buf.write_string("|\n")
+  // Source line with line number
+  buf.write_string(line_num_str)
+  buf.write_string(" | ")
+  buf.write_string(self.source_line)
+  buf.write_char('\n')
+  // Indicator line with ^
+  write_spaces(buf, padding + 1)
+  buf.write_string("| ")
+  // Spaces before the indicator
+  write_spaces(buf, self.column - 1)
+  // The ^ indicators
+  let indicator_len = if self.end_column > self.column {
+    self.end_column - self.column + 1
+  } else {
+    1
+  }
+  write_chars(buf, '^', indicator_len)
+  buf.write_char('\n')
+  // Help message if present
+  match self.help {
+    Some(help_msg) => {
+      write_spaces(buf, padding + 1)
+      buf.write_string("= help: ")
+      buf.write_string(help_msg)
+      buf.write_char('\n')
+    }
+    None => ()
+  }
+  buf.to_string()
 }
 
 /// Parse error type
 pub suberror ParseError {
   ParseError(String)
+  ParseErrorDetailed(ParseErrorInfo)
 }
 
 /// Main parse function
 pub fn parse(input : String) -> @types.Flowchart raise ParseError {
-  let parser = Parser::new(input)
+  parse_with_filename(input, "input.mmd")
+}
+
+/// Parse with custom filename for error messages
+pub fn parse_with_filename(
+  input : String,
+  filename : String
+) -> @types.Flowchart raise ParseError {
+  let parser = Parser::new_with_filename(input, filename)
   parser.skip_whitespace()
   // Parse "graph" or "flowchart" keyword
+  let keyword_col = parser.column
   let is_flowchart = parser.consume("flowchart")
   if not(is_flowchart) {
     if not(parser.consume("graph")) {
-      raise ParseError("Expected 'flowchart' or 'graph' keyword")
+      raise ParseErrorDetailed(
+        parser.make_error_span(
+          "Expected 'flowchart' or 'graph' keyword",
+          keyword_col,
+          keyword_col + 4,
+          Some("Mermaid diagrams must start with 'flowchart' or 'graph'"),
+        ),
+      )
     }
   }
   parser.skip_spaces()
@@ -429,11 +628,18 @@ pub fn parse(input : String) -> @types.Flowchart raise ParseError {
   let _ = parser.consume(";")
   // Parse nodes and edges
   while not(parser.is_eof()) {
-    if not(parser.parse_line(flowchart)) {
-      raise ParseError(
-        "Parse error at line \{parser.line}, column \{parser.column}",
-      )
+    match parser.parse_line(flowchart) {
+      Ok => ()
+      Error(err) => raise ParseErrorDetailed(err)
     }
   }
   flowchart
+}
+
+/// Format a ParseError for display
+pub fn format_error(err : ParseError) -> String {
+  match err {
+    ParseError(msg) => "Error: \{msg}\n"
+    ParseErrorDetailed(info) => info.format()
+  }
 }

@@ -7,6 +7,6 @@ fn main {
     let result = @lib.convert_default(input)
     println(result)
   } catch {
-    @parser.ParseError(e) => println("Error: \{e}")
+    err => println(@lib.format_error(err))
   }
 }
