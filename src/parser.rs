@@ -27,9 +27,14 @@ pub fn parse(input: &str) -> Result<Flowchart, ParseError> {
     let lines: Vec<&str> = input.lines().collect();
 
     // Find the flowchart/graph declaration
-    let (direction, start_idx) = find_flowchart_declaration(&lines)?;
+    let (direction, start_idx, remaining_on_decl_line) = find_flowchart_declaration(&lines)?;
 
     let mut flowchart = Flowchart::new(direction);
+
+    // Parse remaining text on declaration line (e.g., "graph TD; A --> B")
+    if let Some(remaining) = remaining_on_decl_line {
+        parse_statement(&remaining, &mut flowchart, start_idx)?;
+    }
 
     // Parse remaining lines
     for (line_num, line) in lines.iter().enumerate().skip(start_idx) {
@@ -50,17 +55,27 @@ pub fn parse(input: &str) -> Result<Flowchart, ParseError> {
     Ok(flowchart)
 }
 
-fn find_flowchart_declaration(lines: &[&str]) -> Result<(Direction, usize), ParseError> {
+/// Returns (direction, start_line_index, optional_remaining_text_on_declaration_line)
+fn find_flowchart_declaration(lines: &[&str]) -> Result<(Direction, usize, Option<String>), ParseError> {
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
         if trimmed.starts_with("flowchart") || trimmed.starts_with("graph") {
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            // Handle "graph TD; A --> B" format - split by semicolon
+            let (decl_part, remaining) = if let Some(semicolon_pos) = trimmed.find(';') {
+                let decl = &trimmed[..semicolon_pos];
+                let rest = trimmed[semicolon_pos + 1..].trim();
+                (decl, if rest.is_empty() { None } else { Some(rest.to_string()) })
+            } else {
+                (trimmed, None)
+            };
+
+            let parts: Vec<&str> = decl_part.split_whitespace().collect();
             let direction = if parts.len() > 1 {
                 parts[1].parse().unwrap_or(Direction::TB)
             } else {
                 Direction::TB
             };
-            return Ok((direction, i + 1));
+            return Ok((direction, i + 1, remaining));
         }
     }
     Err(ParseError {
@@ -78,21 +93,24 @@ fn parse_statement(
     // Remove trailing semicolon
     let line = line.trim_end_matches(';').trim();
 
-    // Try to parse as edge (may contain node definitions like A[Start] --> B[End])
-    if let Some((from_node, to_node, style, label)) = try_parse_edge(line) {
-        // Extract IDs before moving nodes
-        let from_id = from_node.id.clone();
-        let to_id = to_node.id.clone();
+    // Try to parse as chain edge (A --> B --> C --> D)
+    let edges = try_parse_chain_edge(line);
+    if !edges.is_empty() {
+        for (from_node, to_node, style, label) in edges {
+            // Extract IDs before moving nodes
+            let from_id = from_node.id.clone();
+            let to_id = to_node.id.clone();
 
-        // Add nodes if they don't exist (or update if they have labels)
-        add_or_update_node(flowchart, from_node);
-        add_or_update_node(flowchart, to_node);
+            // Add nodes if they don't exist (or update if they have labels)
+            add_or_update_node(flowchart, from_node);
+            add_or_update_node(flowchart, to_node);
 
-        let mut edge = Edge::new(from_id, to_id, style);
-        if let Some(lbl) = label {
-            edge = edge.with_label(lbl);
+            let mut edge = Edge::new(from_id, to_id, style);
+            if let Some(lbl) = label {
+                edge = edge.with_label(lbl);
+            }
+            flowchart.add_edge(edge);
         }
-        flowchart.add_edge(edge);
         return Ok(());
     }
 
@@ -119,10 +137,9 @@ fn add_or_update_node(flowchart: &mut Flowchart, node: Node) {
     }
 }
 
-fn try_parse_edge(line: &str) -> Option<(Node, Node, EdgeStyle, Option<String>)> {
-    // Edge patterns: A --> B, A -.-> B, A ==> B, A --- B
-    // With labels: A -->|label| B, A -- label --> B
-
+/// Parse chain edges like A --> B --> C --> D
+/// Returns a list of (from_node, to_node, style, label) tuples
+fn try_parse_chain_edge(line: &str) -> Vec<(Node, Node, EdgeStyle, Option<String>)> {
     let edge_patterns = [
         ("==>", EdgeStyle::ThickArrow),
         ("-.->", EdgeStyle::DottedArrow),
@@ -130,25 +147,61 @@ fn try_parse_edge(line: &str) -> Option<(Node, Node, EdgeStyle, Option<String>)>
         ("---", EdgeStyle::Open),
     ];
 
+    // Find all edge positions with their styles
+    let mut edge_positions: Vec<(usize, usize, EdgeStyle)> = Vec::new();
+
     for (pattern, style) in edge_patterns {
-        if let Some(pos) = line.find(pattern) {
-            let left = &line[..pos];
-            let right = &line[pos + pattern.len()..];
-
-            // Parse left side (node with optional label/shape)
-            let from_node = parse_node_from_edge_part(left.trim())?;
-
-            // Check for label after arrow: -->|label| or --|label|-->
-            let (to_part, label) = extract_label(right.trim());
-
-            // Parse right side
-            let to_node = parse_node_from_edge_part(to_part.trim())?;
-
-            return Some((from_node, to_node, style, label));
+        let mut search_start = 0;
+        while let Some(pos) = line[search_start..].find(pattern) {
+            let actual_pos = search_start + pos;
+            edge_positions.push((actual_pos, pattern.len(), style));
+            search_start = actual_pos + pattern.len();
         }
     }
 
-    None
+    if edge_positions.is_empty() {
+        return Vec::new();
+    }
+
+    // Sort by position
+    edge_positions.sort_by_key(|(pos, _, _)| *pos);
+
+    // Split line by edge patterns and collect nodes
+    let mut result = Vec::new();
+    let mut last_end = 0;
+
+    for (i, (pos, pattern_len, style)) in edge_positions.iter().enumerate() {
+        let left = &line[last_end..*pos];
+        let right_start = pos + pattern_len;
+
+        // Determine where right side ends
+        let right_end = if i + 1 < edge_positions.len() {
+            edge_positions[i + 1].0
+        } else {
+            line.len()
+        };
+        let right = &line[right_start..right_end];
+
+        // Parse left side (node with optional label/shape)
+        let from_node = match parse_node_from_edge_part(left.trim()) {
+            Some(n) => n,
+            None => continue,
+        };
+
+        // Check for label after arrow: -->|label| or --|label|-->
+        let (to_part, label) = extract_label(right.trim());
+
+        // Parse right side
+        let to_node = match parse_node_from_edge_part(to_part.trim()) {
+            Some(n) => n,
+            None => continue,
+        };
+
+        result.push((from_node, to_node, *style, label));
+        last_end = right_start;
+    }
+
+    result
 }
 
 fn parse_node_from_edge_part(s: &str) -> Option<Node> {
@@ -365,5 +418,46 @@ flowchart TD
         let input = "flowchart TD\n  A -->|yes| B";
         let fc = parse(input).unwrap();
         assert_eq!(fc.edges[0].label.as_deref(), Some("yes"));
+    }
+
+    #[test]
+    fn test_parse_chain_edge_4_nodes() {
+        // Test: A --> B --> C --> D should create 4 nodes and 3 edges
+        let input = "graph TD; A --> B --> C --> D";
+        let fc = parse(input).unwrap();
+        assert_eq!(fc.nodes.len(), 4, "Should have 4 nodes");
+        assert_eq!(fc.edges.len(), 3, "Should have 3 edges");
+        assert!(fc.get_node("A").is_some(), "Node A should exist");
+        assert!(fc.get_node("B").is_some(), "Node B should exist");
+        assert!(fc.get_node("C").is_some(), "Node C should exist");
+        assert!(fc.get_node("D").is_some(), "Node D should exist");
+        // Verify edge connections
+        assert_eq!(fc.edges[0].from, "A");
+        assert_eq!(fc.edges[0].to, "B");
+        assert_eq!(fc.edges[1].from, "B");
+        assert_eq!(fc.edges[1].to, "C");
+        assert_eq!(fc.edges[2].from, "C");
+        assert_eq!(fc.edges[2].to, "D");
+    }
+
+    #[test]
+    fn test_parse_chain_edge_3_nodes() {
+        // Test: A --> B --> C should create 3 nodes and 2 edges
+        let input = "graph TD; A --> B --> C";
+        let fc = parse(input).unwrap();
+        assert_eq!(fc.nodes.len(), 3, "Should have 3 nodes");
+        assert_eq!(fc.edges.len(), 2, "Should have 2 edges");
+        assert!(fc.get_node("A").is_some(), "Node A should exist");
+        assert!(fc.get_node("B").is_some(), "Node B should exist");
+        assert!(fc.get_node("C").is_some(), "Node C should exist");
+    }
+
+    #[test]
+    fn test_parse_chain_edge_newline_format() {
+        // Test chain edge with newline format
+        let input = "graph TD\n  A --> B --> C --> D";
+        let fc = parse(input).unwrap();
+        assert_eq!(fc.nodes.len(), 4, "Should have 4 nodes");
+        assert_eq!(fc.edges.len(), 3, "Should have 3 edges");
     }
 }
