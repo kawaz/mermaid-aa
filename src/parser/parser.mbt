@@ -101,7 +101,7 @@ fn Parser::current(self : Parser) -> Char? {
 
 /// Advance one character
 fn Parser::advance(self : Parser) -> Unit {
-  if not(self.is_eof()) {
+  if !(self.is_eof()) {
     if char_at(self.input, self.pos) == '\n' {
       self.line = self.line + 1
       self.column = 1
@@ -114,7 +114,7 @@ fn Parser::advance(self : Parser) -> Unit {
 
 /// Skip whitespace (but not newlines for some contexts)
 fn Parser::skip_whitespace(self : Parser) -> Unit {
-  while not(self.is_eof()) {
+  while !(self.is_eof()) {
     match self.current() {
       Some(' ') | Some('\t') | Some('\r') | Some('\n') => self.advance()
       _ => break
@@ -124,7 +124,7 @@ fn Parser::skip_whitespace(self : Parser) -> Unit {
 
 /// Skip whitespace except newlines
 fn Parser::skip_spaces(self : Parser) -> Unit {
-  while not(self.is_eof()) {
+  while !(self.is_eof()) {
     match self.current() {
       Some(' ') | Some('\t') => self.advance()
       _ => break
@@ -183,14 +183,14 @@ fn Parser::parse_identifier(self : Parser) -> String? {
   // First character must be letter or underscore or digit
   match self.current() {
     Some(c) => {
-      if not(is_id_start(c)) && not(c >= '0' && c <= '9') {
+      if !(is_id_start(c)) && !(c >= '0' && c <= '9') {
         return None
       }
     }
     None => return None
   }
   // Parse remaining characters
-  while not(self.is_eof()) {
+  while !(self.is_eof()) {
     match self.current() {
       Some(c) => {
         if is_id_char(c) || (c >= '0' && c <= '9') {
@@ -212,7 +212,7 @@ fn Parser::parse_identifier(self : Parser) -> String? {
 /// Parse text until closing delimiter
 fn Parser::parse_until(self : Parser, close : String) -> String? {
   let start = self.pos
-  while not(self.is_eof()) && not(self.starts_with(close)) {
+  while !(self.is_eof()) && !(self.starts_with(close)) {
     self.advance()
   }
   if self.starts_with(close) {
@@ -310,7 +310,7 @@ fn Parser::parse_until_any(
   endings : Array[String]
 ) -> (String, String)? {
   let start = self.pos
-  while not(self.is_eof()) {
+  while !(self.is_eof()) {
     for ending in endings {
       if self.starts_with(ending) {
         return Some((get_substring(self.input, start, self.pos), ending))
@@ -321,12 +321,28 @@ fn Parser::parse_until_any(
   None
 }
 
+/// Parse edge label: |text|
+fn Parser::parse_edge_label(self : Parser) -> String? {
+  if self.consume("|") {
+    match self.parse_until("|") {
+      Some(label) => {
+        let _ = self.consume("|")
+        Some(label)
+      }
+      None => None
+    }
+  } else {
+    None
+  }
+}
+
 /// Parse edge style: -->, -.->, ==>, ---
+/// Supports both pre-label (--|text|-->) and post-label (-->|text|) syntax
 fn Parser::parse_edge(self : Parser) -> (@types.EdgeStyle, String?)? {
   self.skip_spaces()
   // With label: --|text|-->
   if self.consume("--") {
-    // Check for label
+    // Check for pre-label: --|text|-->
     if self.consume("|") {
       match self.parse_until("|") {
         Some(label) => {
@@ -346,28 +362,38 @@ fn Parser::parse_edge(self : Parser) -> (@types.EdgeStyle, String?)? {
     }
     // Solid arrow: -->
     if self.consume(">") {
-      return Some((@types.Solid, None))
+      // Check for post-label: -->|text|
+      let label = self.parse_edge_label()
+      return Some((@types.Solid, label))
     }
     // Open: ---
     if self.consume("-") {
-      return Some((@types.Open, None))
+      // Check for post-label: ---|text|
+      let label = self.parse_edge_label()
+      return Some((@types.Open, label))
     }
     return None
   }
   // Dotted: -.->
   if self.consume("-.") {
     if self.consume("->") {
-      return Some((@types.Dotted, None))
+      // Check for post-label: -.->|text|
+      let label = self.parse_edge_label()
+      return Some((@types.Dotted, label))
     }
-    // Dotted with label: -.-|text|-.-
+    // Dotted open: -.-
     if self.consume("-") {
-      return Some((@types.Dotted, None))
+      // Check for post-label: -.-|text|
+      let label = self.parse_edge_label()
+      return Some((@types.Dotted, label))
     }
     return None
   }
   // Thick: ==>
   if self.consume("==>") {
-    return Some((@types.Thick, None))
+    // Check for post-label: ==>|text|
+    let label = self.parse_edge_label()
+    return Some((@types.Thick, label))
   }
   None
 }
@@ -391,7 +417,7 @@ fn Parser::parse_node(self : Parser) -> @types.Node? {
 /// Skip comment (starts with %%)
 fn Parser::skip_comment(self : Parser) -> Unit {
   if self.starts_with("%%") {
-    while not(self.is_eof()) {
+    while !(self.is_eof()) {
       match self.current() {
         Some('\n') => {
           self.advance()
@@ -596,8 +622,8 @@ pub fn parse_with_filename(
   // Parse "graph" or "flowchart" keyword
   let keyword_col = parser.column
   let is_flowchart = parser.consume("flowchart")
-  if not(is_flowchart) {
-    if not(parser.consume("graph")) {
+  if !(is_flowchart) {
+    if !(parser.consume("graph")) {
       raise ParseErrorDetailed(
         parser.make_error_span(
           "Expected 'flowchart' or 'graph' keyword",
@@ -627,7 +653,7 @@ pub fn parse_with_filename(
   parser.skip_spaces()
   let _ = parser.consume(";")
   // Parse nodes and edges
-  while not(parser.is_eof()) {
+  while !(parser.is_eof()) {
     match parser.parse_line(flowchart) {
       Ok => ()
       Error(err) => raise ParseErrorDetailed(err)

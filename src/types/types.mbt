@@ -11,7 +11,18 @@ pub(all) enum WidthMode {
   Console
   /// Ambiguous=2, BoxDrawing=2 (legacy compatibility)
   Legacy
-} derive(Eq, Show)
+} derive(Eq, Debug)
+
+pub impl Show for WidthMode with output(self, logger) {
+  logger.write_string(
+    match self {
+      Half => "Half"
+      Full => "Full"
+      Console => "Console"
+      Legacy => "Legacy"
+    },
+  )
+}
 
 /// Parse width mode from string
 pub fn WidthMode::from_string(s : String) -> WidthMode? {
@@ -47,7 +58,19 @@ pub(all) enum Direction {
   BT  // Bottom to Top
   LR  // Left to Right
   RL  // Right to Left
-} derive(Eq, Show)
+} derive(Eq, Debug)
+
+pub impl Show for Direction with output(self, logger) {
+  logger.write_string(
+    match self {
+      TB => "TB"
+      TD => "TD"
+      BT => "BT"
+      LR => "LR"
+      RL => "RL"
+    },
+  )
+}
 
 /// Parse direction from string
 pub fn Direction::from_string(s : String) -> Direction? {
@@ -79,7 +102,22 @@ pub(all) enum NodeShape {
   Circle          // A((text))
   Parallelogram   // A[/text/]
   Trapezoid       // A[/text\]
-} derive(Eq, Show)
+} derive(Eq, Debug)
+
+pub impl Show for NodeShape with output(self, logger) {
+  logger.write_string(
+    match self {
+      Rectangle => "Rectangle"
+      Rounded => "Rounded"
+      Stadium => "Stadium"
+      Diamond => "Diamond"
+      Hexagon => "Hexagon"
+      Circle => "Circle"
+      Parallelogram => "Parallelogram"
+      Trapezoid => "Trapezoid"
+    },
+  )
+}
 
 /// Edge/Arrow style
 pub(all) enum EdgeStyle {
@@ -87,14 +125,14 @@ pub(all) enum EdgeStyle {
   Dotted    // -.->
   Thick     // ==>
   Open      // ---
-} derive(Eq, Show)
+} derive(Eq, Debug)
 
 /// Node in the flowchart
 pub(all) struct Node {
   id : String
   label : String
   shape : NodeShape
-} derive(Eq, Show)
+} derive(Eq, Debug)
 
 /// Create a new Node
 pub fn Node::new(id : String, label : String, shape : NodeShape) -> Node {
@@ -122,7 +160,7 @@ pub(all) struct Edge {
   to : String
   style : EdgeStyle
   label : String?
-} derive(Eq, Show)
+} derive(Eq, Debug)
 
 /// Create a new Edge
 pub fn Edge::new(
@@ -159,7 +197,7 @@ pub(all) struct Flowchart {
   direction : Direction
   nodes : Array[Node]
   edges : Array[Edge]
-} derive(Eq, Show)
+} derive(Eq, Debug)
 
 /// Create a new Flowchart
 pub fn Flowchart::new(direction : Direction) -> Flowchart {
@@ -204,7 +242,19 @@ pub(all) enum Charset {
   UnicodeRound  // Rounded box drawing
   UnicodeBold   // Bold box drawing
   UnicodeDouble // Double box drawing
-} derive(Eq, Show)
+} derive(Eq, Debug)
+
+pub impl Show for Charset with output(self, logger) {
+  logger.write_string(
+    match self {
+      Ascii => "Ascii"
+      Unicode => "Unicode"
+      UnicodeRound => "UnicodeRound"
+      UnicodeBold => "UnicodeBold"
+      UnicodeDouble => "UnicodeDouble"
+    },
+  )
+}
 
 /// Parse charset from string
 pub fn Charset::from_string(s : String) -> Charset? {
@@ -222,7 +272,7 @@ pub fn Charset::from_string(s : String) -> Charset? {
 pub(all) struct RenderOptions {
   charset : Charset
   width_mode : WidthMode
-} derive(Eq, Show)
+} derive(Eq, Debug)
 
 /// Create default render options
 pub fn RenderOptions::default() -> RenderOptions {
