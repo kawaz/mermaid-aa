@@ -603,7 +603,6 @@ pub fn ParseErrorInfo::format(self : ParseErrorInfo) -> String {
 
 /// Parse error type
 pub suberror ParseError {
-  ParseError(String)
   ParseErrorDetailed(ParseErrorInfo)
 }
 
@@ -665,7 +664,6 @@ pub fn parse_with_filename(
 /// Format a ParseError for display
 pub fn format_error(err : ParseError) -> String {
   match err {
-    ParseError(msg) => "Error: \{msg}\n"
     ParseErrorDetailed(info) => info.format()
   }
 }

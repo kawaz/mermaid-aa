@@ -151,9 +151,6 @@ test "error format - missing keyword" {
     let _ = @parser.parse("invalid input")
     assert_true(false, msg="should have raised error")
   } catch {
-    @parser.ParseError(msg) => {
-      assert_true(msg.contains("flowchart") || msg.contains("graph"))
-    }
     @parser.ParseErrorDetailed(info) => {
       let formatted = info.format()
       assert_true(formatted.contains("Error:"))
@@ -172,9 +169,6 @@ test "error format - missing node after arrow" {
     )
     assert_true(false, msg="should have raised error")
   } catch {
-    @parser.ParseError(msg) => {
-      assert_true(msg.contains("Missing") || msg.contains("error"))
-    }
     @parser.ParseErrorDetailed(info) => {
       let formatted = info.format()
       assert_true(formatted.contains("Error: Missing node identifier after arrow"))
